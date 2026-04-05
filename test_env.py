@@ -102,12 +102,12 @@ def test_penalty():
     check("Repeated action → penalty > 0", _compute_penalty([resize, resize], 0) > 0.0)
     check("Destructive termination → 0.50 penalty", _compute_penalty([], 1) == 0.50)
     check("2 destructive → 1.0 (clamped)", _compute_penalty([], 2) == 1.0)
-    check("3 trailing noops → penalty", _compute_penalty([resize, noop, noop, noop], 0) > 0.0)
-    # 2 identical noops trigger repeat-action penalty (0.1) but NOT the noop-tail penalty
-    pen_2noop = _compute_penalty([resize, noop, noop], 0)
-    pen_3noop = _compute_penalty([resize, noop, noop, noop], 0)
-    check("2 trailing noops → no EXTRA noop-tail penalty vs 3",
-          pen_3noop > pen_2noop)
+    check("3 trailing noops after useful action → NO penalty", _compute_penalty([resize, noop, noop, noop], 0) == 0.0)
+    check("All-noop idleness (3 noops, no useful actions) → penalty",
+          _compute_penalty([noop, noop, noop], 0) > 0.0)
+    pen_3noop_idle = _compute_penalty([noop, noop, noop], 0)
+    pen_5noop_idle = _compute_penalty([noop, noop, noop, noop, noop], 0)
+    check("More idle noops → more penalty", pen_5noop_idle > pen_3noop_idle)
     prov = Action(action_type="provision", instance_type="medium")
     check("2 provisions no migrate → penalty", _compute_penalty([prov, prov], 0) > 0.0)
 
