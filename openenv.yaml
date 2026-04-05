@@ -1,15 +1,16 @@
-# openenv.yaml — Environment manifest for DevOps/FinOps OpenEnv
+# openenv.yaml — Environment manifest for DevOps/FinOps OpenEnv v2.0
 # Validated with: openenv validate
 
 spec_version: 1
 
 name: devops-finops-cloud-optimizer
-version: "1.0.0"
+version: "2.0.0"
 description: >
   AI agent environment for cloud infrastructure cost vs performance optimization.
-  Agents manage a simulated fleet of cloud servers, making decisions about
-  provisioning, termination, resizing, and workload migration to minimize cost
-  while maintaining performance SLAs.
+  Agents manage a simulated fleet of cloud servers with 4 resource dimensions
+  (CPU, RAM, disk IOPS, network), spot instance eviction, cascading workload
+  failures, and deterministic traffic spikes. Supports 3 fixed difficulty tiers
+  plus procedural generation for unlimited evaluation scenarios.
 author: "aryanpatel"
 tags:
   - openenv
@@ -26,9 +27,9 @@ tasks:
   - id: easy
     name: "Single Server Rightsizing"
     description: >
-      A single workload runs on a massively over-provisioned xlarge server.
-      Resize or replace it with the smallest instance that meets the workload's
-      needs to bring cost under budget ($0.20/hr).
+      Two workloads run on a massively over-provisioned xlarge server.
+      Resize to the smallest instance that fits both workloads' CPU+RAM+disk+net
+      needs without breaching SLAs. Budget: $0.25/hr.
     difficulty: easy
     max_steps: 5
 
@@ -36,8 +37,8 @@ tasks:
     name: "Multi-Service Consolidation"
     description: >
       Four workloads each run on their own oversized server (total $2.40/hr).
-      Consolidate onto fewer, right-sized servers to cut cost below budget
-      ($0.50/hr) while keeping all SLAs met.
+      Consolidate onto fewer, right-sized servers. wl-api depends on wl-db
+      (cascading failure). Budget: $0.50/hr.
     difficulty: medium
     max_steps: 10
 
@@ -45,10 +46,13 @@ tasks:
     name: "Fleet Chaos Triage"
     description: >
       Diagnose and fix a broken fleet with 3 SLA breaches, 1 orphaned workload,
-      1 idle server, and massive over-provisioning ($1.70/hr vs $0.80/hr budget).
-      Achieve zero downtime, zero SLA breaches, and cost under budget.
+      1 idle server, cascading failures (wl-api→wl-auth, wl-search→wl-db),
+      and over-provisioning. Budget: $1.20/hr.
     difficulty: hard
     max_steps: 15
+
+# NOTE: Procedural generation is also supported via task_id="random" + seed parameter.
+# This generates unique fleet configurations for unlimited evaluation scenarios.
 
 # ── Observation Space ──────────────────────────────────────────────────
 
@@ -58,26 +62,35 @@ observation_space:
     description: "All active server instances in the fleet"
     fields:
       server_id: "Unique server identifier (e.g. 'srv-001')"
-      instance_type: "Instance tier: nano/micro/small/medium/large/xlarge"
+      instance_type: "Instance tier from the 11-type catalog"
       cpu_cores: "Number of vCPU cores"
       ram_gb: "RAM in GB"
-      cpu_utilization: "Current CPU usage 0.0-1.0"
-      ram_utilization: "Current RAM usage 0.0-1.0"
+      disk_iops: "Disk I/O operations per second"
+      network_gbps: "Network bandwidth in Gbps"
+      cpu_utilization: "Current CPU usage (uncapped, can exceed 1.0 = overloaded)"
+      ram_utilization: "Current RAM usage (uncapped)"
+      disk_utilization: "Current disk IOPS usage (uncapped)"
+      network_utilization: "Current network usage (uncapped)"
       cost_per_hour: "Hourly cost in USD"
       assigned_workloads: "List of workload IDs running on this server"
+      is_spot: "True if this is a spot instance (can be evicted)"
+      is_overloaded: "True if any resource dimension exceeds 100%"
 
   workloads:
     type: "List[WorkloadInfo]"
     description: "All workloads that must be kept running"
     fields:
-      workload_id: "Unique workload identifier (e.g. 'wl-api')"
+      workload_id: "Unique workload identifier"
       name: "Human-readable workload name"
       required_cpu: "Minimum CPU cores needed"
       required_ram: "Minimum RAM in GB needed"
+      required_disk_iops: "Minimum disk IOPS needed"
+      required_net_gbps: "Minimum network bandwidth in Gbps needed"
       current_latency_ms: "Current p95 response latency in ms"
       sla_latency_ms: "Maximum acceptable p95 latency before SLA breach"
       is_critical: "If true, SLA breach carries 2x penalty weight"
       assigned_server: "Server ID where workload runs, or null if unassigned"
+      dependencies: "List of workload IDs this workload depends on (cascading failures)"
 
   total_cost_per_hour:
     type: float
@@ -93,7 +106,7 @@ observation_space:
 
   unassigned_workloads:
     type: int
-    description: "Count of workloads not running on any server (effectively DOWN)"
+    description: "Count of workloads not running on any server (DOWN)"
 
   step_number:
     type: int
@@ -109,7 +122,15 @@ observation_space:
 
   message:
     type: str
-    description: "Human-readable feedback about the last action's effect"
+    description: "Structured feedback with prefix: [OK], [ERROR:*], [WARN:*], [DESTRUCTIVE], [EVICTION]"
+
+  traffic_multiplier_active:
+    type: bool
+    description: "True if seed-based traffic fluctuation is active"
+
+  spot_eviction_occurred:
+    type: bool
+    description: "True if a spot instance was evicted this step"
 
 # ── Action Space ───────────────────────────────────────────────────────
 
@@ -123,8 +144,8 @@ action_space:
     description: "Target server for terminate/resize actions"
 
   instance_type:
-    type: "Optional[Literal['nano','micro','small','medium','large','xlarge']]"
-    description: "Instance tier for provision/resize actions"
+    type: "Optional[str]"
+    description: "Instance tier for provision/resize (11 types available)"
 
   workload_id:
     type: "Optional[str]"
@@ -138,5 +159,6 @@ action_space:
 
 reward_range: [0.0, 1.0]
 reward_formula: >
-  score = (cost_efficiency * 0.50) + (performance_score * 0.40) - (penalty * 0.10)
-  Clamped to [0.0, 1.0]. Partial credit across full trajectory.
+  score = (cost_efficiency × 0.40) + (performance × 0.35) − (penalty × 0.25)
+  Clamped to [0.0, 1.0]. If performance=0 (all unhealthy), cost_efficiency is zeroed.
+  Destructive termination incurs 0.50 penalty per occurrence (very severe at 0.25 weight).

@@ -8,21 +8,24 @@
 
 Cloud infrastructure is the single largest variable cost for most software companies. In 2025, global cloud spend exceeded $800B — and an estimated 30% of it is wasted on over-provisioned, idle, or misconfigured resources (Flexera State of the Cloud Report).
 
-**FinOps** (Financial Operations) is the discipline of making cloud spending decisions based on data. Today, these decisions are made manually by engineers staring at dashboards. The gap between "what we're spending" and "what we should be spending" is exactly the kind of problem AI agents can solve — if they can learn to reason about:
+**FinOps** (Financial Operations) is the discipline of making cloud spending decisions based on data. This environment simulates a fleet of cloud servers running production workloads across **4 resource dimensions** (CPU, RAM, disk IOPS, network bandwidth). The agent observes real-time utilization, latency, cost, and SLA status — then takes infrastructure actions to minimize cost while keeping everything healthy.
 
-- **Resource right-sizing:** Matching server capacity to actual workload demand
-- **Consolidation:** Packing multiple workloads onto fewer servers efficiently
-- **SLA management:** Maintaining latency guarantees while cutting costs
-- **Triage under chaos:** Diagnosing and fixing broken infrastructure with incomplete information
+### What makes this environment unique
 
-This environment simulates a fleet of cloud servers running production workloads. The agent observes real-time utilization, latency, cost, and SLA status — then takes infrastructure actions (provision, terminate, resize, migrate) to minimize cost while keeping everything healthy.
+- **4-dimensional resource model:** CPU, RAM, disk IOPS, and network bandwidth. A server can be overloaded on any dimension, creating non-obvious bottlenecks.
+- **11 instance types** including specialized tiers (compute-optimized, memory-optimized, storage-optimized) and **spot instances** that are 70% cheaper but can be deterministically evicted.
+- **Cascading failures:** Workloads can depend on other workloads. If a dependency breaches SLA or goes down, the dependent's latency inflates by 1.5×.
+- **Deterministic traffic spikes:** When a seed is provided, workload demands fluctuate per step (range 0.85×–1.45×), testing adaptive reasoning.
+- **Procedural task generation:** Beyond the 3 fixed tasks, unlimited evaluation scenarios via `task_id="random"` + seed.
+- **Session management:** Multiple concurrent agents can run independently via session IDs.
 
 ### Why this matters for RL/GRPO training
 
-- **Multi-objective optimization:** Cost and performance are in tension. There is no single "right answer" — only tradeoffs. This tests whether an agent can find the efficient frontier.
-- **Sequential decision-making with ordering constraints:** You can't terminate a server before migrating its workloads. You can't migrate without free capacity. Actions must be sequenced correctly.
-- **Partial credit everywhere:** The reward function gives continuous signal, not binary pass/fail. An agent that reduces cost from $2.40 to $0.90 scores much higher than one that does nothing — even if $0.90 is still over the $0.50 budget.
-- **Deterministic grading:** Same actions always produce the same score. No randomness, no hidden state. Pure reasoning benchmark.
+- **Multi-objective optimization:** Cost and performance are in tension. The reward function gives continuous signal with partial credit across the full trajectory.
+- **Sequential decision-making with ordering constraints:** You can't terminate before migrating. You can't migrate without free capacity. Actions must be sequenced correctly.
+- **Novel mechanics:** Spot eviction forces planning around failure modes. Cascading failures require understanding dependency graphs. Traffic spikes require adaptive resource allocation.
+- **Generalization pressure:** Procedural generation prevents memorization. Agents must learn transferable strategies.
+- **Deterministic grading:** Same actions always produce the same score. No randomness, no hidden state.
 
 ---
 
@@ -32,53 +35,69 @@ Every step, the agent receives a full snapshot of the infrastructure:
 
 | Field | Type | Description |
 |---|---|---|
-| `servers` | `List[ServerInfo]` | All active server instances in the fleet (see sub-fields below) |
-| `workloads` | `List[WorkloadInfo]` | All workloads that must be kept running (see sub-fields below) |
+| `servers` | `List[ServerInfo]` | All active server instances (see sub-fields) |
+| `workloads` | `List[WorkloadInfo]` | All workloads that must be kept running |
 | `total_cost_per_hour` | `float` | Sum of all running server costs in USD/hr |
 | `budget_per_hour` | `float` | Target budget the agent should optimize toward |
-| `sla_violations` | `int` | Count of workloads currently breaching their latency SLA |
-| `unassigned_workloads` | `int` | Count of workloads not running on any server (DOWN) |
-| `step_number` | `int` | Current step in the episode (0-indexed) |
-| `max_steps` | `int` | Maximum steps allowed before episode ends |
+| `sla_violations` | `int` | Workloads currently breaching latency SLA |
+| `unassigned_workloads` | `int` | Workloads not running on any server (DOWN) |
+| `step_number` | `int` | Current step in episode (0-indexed) |
+| `max_steps` | `int` | Maximum steps before episode ends |
 | `done` | `bool` | True if the episode is over |
-| `message` | `str` | Human-readable feedback about the last action |
+| `message` | `str` | Structured feedback: `[OK]`, `[ERROR:*]`, `[WARN:*]`, `[DESTRUCTIVE]`, `[EVICTION]` |
+| `traffic_multiplier_active` | `bool` | True if seed-based traffic fluctuation is active |
+| `spot_eviction_occurred` | `bool` | True if a spot instance was evicted this step |
 
 ### ServerInfo sub-fields
 
 | Field | Type | Description |
 |---|---|---|
 | `server_id` | `str` | Unique identifier (e.g. `"srv-001"`) |
-| `instance_type` | `str` | Tier: `nano` / `micro` / `small` / `medium` / `large` / `xlarge` |
+| `instance_type` | `str` | One of 11 instance types (see catalog below) |
 | `cpu_cores` | `int` | Number of vCPU cores |
 | `ram_gb` | `int` | RAM in GB |
-| `cpu_utilization` | `float` | Current CPU usage, 0.0–1.0 |
-| `ram_utilization` | `float` | Current RAM usage, 0.0–1.0 |
+| `disk_iops` | `int` | Disk I/O operations per second |
+| `network_gbps` | `float` | Network bandwidth in Gbps |
+| `cpu_utilization` | `float` | Current CPU usage (**uncapped** — can exceed 1.0 when overloaded) |
+| `ram_utilization` | `float` | Current RAM usage (uncapped) |
+| `disk_utilization` | `float` | Current disk usage (uncapped) |
+| `network_utilization` | `float` | Current network usage (uncapped) |
 | `cost_per_hour` | `float` | Hourly cost in USD |
 | `assigned_workloads` | `List[str]` | Workload IDs running on this server |
+| `is_spot` | `bool` | True if spot instance (can be evicted) |
+| `is_overloaded` | `bool` | True if any resource dimension exceeds 100% |
 
 ### WorkloadInfo sub-fields
 
 | Field | Type | Description |
 |---|---|---|
 | `workload_id` | `str` | Unique identifier (e.g. `"wl-api"`) |
-| `name` | `str` | Human-readable name (e.g. `"API Gateway"`) |
+| `name` | `str` | Human-readable name |
 | `required_cpu` | `float` | Minimum CPU cores needed |
-| `required_ram` | `float` | Minimum RAM in GB needed |
-| `current_latency_ms` | `float` | Current p95 latency in milliseconds |
-| `sla_latency_ms` | `float` | Maximum acceptable latency before SLA breach |
+| `required_ram` | `float` | Minimum RAM in GB |
+| `required_disk_iops` | `int` | Minimum disk IOPS needed |
+| `required_net_gbps` | `float` | Minimum network Gbps needed |
+| `current_latency_ms` | `float` | Current p95 latency in ms |
+| `sla_latency_ms` | `float` | Maximum acceptable latency |
 | `is_critical` | `bool` | If true, SLA breach carries 2× penalty weight |
-| `assigned_server` | `str \| null` | Server ID, or `null` if unassigned (DOWN) |
+| `assigned_server` | `str \| null` | Server ID, or `null` if unassigned |
+| `dependencies` | `List[str]` | Workload IDs this workload depends on |
 
-### Instance Type Catalog
+### Instance Type Catalog (11 types)
 
-| Type | CPU | RAM | Cost/hr |
-|---|---|---|---|
-| `nano` | 1 | 1 GB | $0.05 |
-| `micro` | 1 | 2 GB | $0.10 |
-| `small` | 2 | 4 GB | $0.20 |
-| `medium` | 4 | 8 GB | $0.40 |
-| `large` | 8 | 16 GB | $0.80 |
-| `xlarge` | 16 | 32 GB | $1.60 |
+| Type | CPU | RAM | Disk IOPS | Network | Cost/hr | Notes |
+|---|---|---|---|---|---|---|
+| `nano` | 1 | 1 GB | 1,000 | 0.5 Gbps | $0.05 | Minimal |
+| `micro` | 1 | 2 GB | 2,000 | 0.5 Gbps | $0.10 | Light workloads |
+| `small` | 2 | 4 GB | 3,000 | 1.0 Gbps | $0.20 | General purpose |
+| `medium` | 4 | 8 GB | 5,000 | 2.0 Gbps | $0.40 | General purpose |
+| `large` | 8 | 16 GB | 10,000 | 5.0 Gbps | $0.80 | Heavy workloads |
+| `xlarge` | 16 | 32 GB | 20,000 | 10.0 Gbps | $1.60 | Maximum capacity |
+| `compute-opt` | 8 | 8 GB | 5,000 | 5.0 Gbps | $0.60 | High CPU, low RAM |
+| `memory-opt` | 4 | 32 GB | 10,000 | 2.0 Gbps | $0.70 | High RAM |
+| `storage-opt` | 4 | 8 GB | 30,000 | 2.0 Gbps | $0.55 | High disk IOPS |
+| `spot-medium` | 4 | 8 GB | 5,000 | 2.0 Gbps | **$0.12** | ⚡ 70% cheaper, **can be evicted** |
+| `spot-large` | 8 | 16 GB | 10,000 | 5.0 Gbps | **$0.24** | ⚡ 70% cheaper, **can be evicted** |
 
 ---
 
@@ -86,247 +105,170 @@ Every step, the agent receives a full snapshot of the infrastructure:
 
 Each step, the agent submits exactly one action:
 
-| Field | Type | Options | Description |
+| Action | Required Fields | Effect | Risk |
 |---|---|---|---|
-| `action_type` | `str` | `provision`, `terminate`, `resize`, `migrate`, `noop` | The infrastructure operation to perform |
-| `server_id` | `str \| null` | Any valid server ID | Target server (required for `terminate`, `resize`) |
-| `instance_type` | `str \| null` | `nano`, `micro`, `small`, `medium`, `large`, `xlarge` | Instance tier (required for `provision`, `resize`) |
-| `workload_id` | `str \| null` | Any valid workload ID | Workload to move (required for `migrate`) |
-| `target_server_id` | `str \| null` | Any valid server ID | Destination server (required for `migrate`) |
-
-### Action semantics
-
-| Action | Effect | Risk |
-|---|---|---|
-| `provision` | Creates a new server (empty, no workloads) | Increases cost without benefit if nothing is migrated to it |
-| `terminate` | Destroys a server permanently | **Orphans all workloads** on it — they become unassigned (DOWN). Incurs +0.3 penalty. |
-| `resize` | Changes a server's instance type in-place | Keeps workloads assigned. May cause SLA breach if downsized too aggressively. |
-| `migrate` | Moves a workload from its current server to another | Target server must exist. Also works for assigning orphaned workloads. |
-| `noop` | Does nothing | Wastes a step. 3+ consecutive noops incur escalating penalty. |
+| `provision` | `instance_type` | Creates a new empty server | Increases cost without benefit if nothing migrated to it |
+| `terminate` | `server_id` | Destroys a server permanently | **Orphans all workloads** — 0.50 penalty per occurrence |
+| `resize` | `server_id`, `instance_type` | Changes instance type in-place | May cause SLA breach if downsized too aggressively |
+| `migrate` | `workload_id`, `target_server_id` | Moves a workload to another server | Target may become overloaded. Capacity warnings shown |
+| `noop` | — | Does nothing | Wastes a step. 3+ consecutive noops incur escalating penalty |
 
 ---
 
 ## 4. Reward Function
 
-The reward is computed at every step as a composite of three components:
-
 ```
-score = (cost_efficiency × 0.50) + (performance_score × 0.40) − (penalty × 0.10)
+score = (cost_efficiency × 0.40) + (performance × 0.35) − (penalty × 0.25)
 ```
 
-Clamped to **[0.0, 1.0]**. Fully deterministic — same actions always produce the same score.
+Clamped to **[0.0, 1.0]**. Fully deterministic. If performance = 0 (all workloads unhealthy), cost_efficiency is zeroed — you can't score well by just cutting costs.
 
-### Cost Efficiency (50% weight)
+### Cost Efficiency (40% weight)
 
-Rewards lower cost, not just being "under budget":
-
-| Total Cost vs Budget | Cost Efficiency Score |
+| Condition | Score |
 |---|---|
-| Zero cost (theoretical) | 1.00 |
-| 50% of budget | 0.90 |
-| At budget | 0.80 |
-| 2× budget | 0.40 |
-| 3× budget or more | 0.00 |
+| Zero cost | 1.00 |
+| 50% of budget | 0.95 |
+| At budget | 0.90 |
+| 1.5× budget | 0.45 |
+| 2× budget or more | 0.00 |
 
-**Example:** Budget is $0.50/hr. Agent reduces cost from $2.40 to $0.80.
-Cost efficiency = 0.80 − 0.40 × (0.80 − 0.50) / 0.50 = **0.56**. Partial credit for progress.
+### Performance Score (35% weight)
 
-### Performance Score (40% weight)
+Weighted fraction of workloads that are assigned AND meeting SLA. Critical workloads carry 2× weight.
 
-Weighted fraction of workloads that are both assigned to a server AND meeting their SLA:
+### Penalty (25% weight — severe)
 
-- Each healthy workload contributes its weight (1.0 for normal, **2.0 for critical**)
-- Unassigned workloads and SLA-breaching workloads contribute 0
-
-**Example:** 4 workloads (2 critical). API Gateway (critical) is breaching SLA, rest are healthy.
-Weights: 2+2+1+1 = 6. Healthy: 2+1+1 = 4. Performance = 4/6 = **0.667**.
-
-### Penalty (10% weight, deducted)
-
-| Penalty Source | Amount | Rationale |
+| Source | Amount | Notes |
 |---|---|---|
-| Repeated identical action | +0.10 per repeat | Prevents loops — agents must make progress |
-| Destructive termination (server with workloads) | +0.30 per occurrence | Orphaning workloads is the worst mistake |
-| 3+ trailing noops | +0.05 per noop beyond 2 | Prevents agents from giving up early |
-| 2+ provisions without any migration | +0.10 | Prevents mindless server spawning |
-
-Penalty is clamped to 1.0 maximum.
+| Repeated identical non-noop action | +0.15 per repeat | Prevents loops (noops excluded) |
+| Consecutive non-noop loop (3+) | +0.10 per iteration | Extra penalty for action loops |
+| **Destructive termination** | **+0.50** per occurrence | Orphaning workloads is catastrophic |
+| All-noop idleness | +0.05 per noop beyond 2 | Only if agent did zero useful actions |
+| 2+ provisions without migration | +0.10 | Prevents mindless provisioning |
 
 ---
 
-## 5. Tasks
+## 5. Novel Mechanics
 
-### Task 1: Single Server Rightsizing
+### Spot Instance Eviction
+
+Spot instances (`spot-medium`, `spot-large`) cost 70% less but can be **evicted** at steps 3, 7, and 12. Eviction is deterministic (based on server ID hash), so agents can learn to predict and plan around it. Evicted servers are removed; all workloads on them become orphaned.
+
+### Cascading Failures
+
+Workloads can declare `dependencies`. If a dependency is DOWN (unassigned) or breaching SLA, the dependent workload's latency is inflated by 1.5× per failing dependency. This creates chains where fixing one root cause resolves multiple SLA violations.
+
+### Traffic Spikes
+
+When a `seed` is provided at `/reset`, workload resource demands fluctuate per step (deterministic range: 0.85×–1.45×). This forces agents to build in headroom rather than right-sizing to exact capacity.
+
+### 4D Resource Bottlenecks
+
+Latency is driven by the **worst** resource dimension: `max(CPU%, RAM%, disk%, network%)`. A server with low CPU but saturated disk IOPS will breach SLA just like a CPU-overloaded one.
+
+---
+
+## 6. Tasks
+
+### Task 1: Single Server Rightsizing (Easy)
 
 | | |
 |---|---|
-| **Difficulty** | 🟢 Easy |
 | **Max Steps** | 5 |
-| **Budget** | $0.20/hr |
-| **Objective** | Resize a massively over-provisioned xlarge server ($1.60/hr) to match a lightweight workload that only needs 1 CPU / 2 GB RAM |
+| **Budget** | $0.25/hr |
+| **Objective** | Resize an xlarge server ($1.60/hr) running 2 workloads (0.5+1.0 CPU, 1.0+1.5 GB RAM) to the smallest instance that keeps both SLAs met |
 
-**Starting state:** 1 xlarge server running 1 workload ("Company Website"). The server is using 6% of its capacity — pure waste.
+**What a good agent does:** Resizes to `small` (2 CPU, 4 GB). Both workloads fit. Cost drops from $1.60 to $0.20.
 
-**What a good agent does:** Resize `srv-001` from `xlarge` to `micro` in a single action. Cost drops from $1.60 to $0.10. SLA stays met. Score: ~0.85.
+**Why it's not trivial:** Agent must verify BOTH workloads fit — `micro` (1 CPU) causes CPU overload and SLA breach.
 
-**What a bad agent does:** Terminates the server (orphans the workload), provisions a new one but forgets to migrate, or does nothing.
-
----
-
-### Task 2: Multi-Service Consolidation
+### Task 2: Multi-Service Consolidation (Medium)
 
 | | |
 |---|---|
-| **Difficulty** | 🟡 Medium |
 | **Max Steps** | 10 |
 | **Budget** | $0.50/hr |
-| **Objective** | Consolidate 4 workloads from 4 oversized servers ($2.40/hr total) onto fewer right-sized servers |
+| **Objective** | Consolidate 4 workloads from 4 oversized servers ($2.40/hr) with cascading dependency (wl-api→wl-db) |
 
-**Starting state:** 4 servers (2 medium, 2 large), each running a single workload. Combined utilization is ~15%. Two workloads are **critical** (API Gateway, Database Replica).
-
-**What a good agent does:** Migrates all workloads onto 1 large server ($0.80/hr) and terminates the other 3. This requires correct ordering: migrate first, terminate second. Score: ~0.68.
-
-**What a bad agent does:** Over-consolidates onto a medium server (causes SLA breaches on critical workloads), terminates servers before migrating (orphans workloads), or provisions new servers without using them.
-
-**The tradeoff:** A single large server ($0.80) keeps all SLAs met but exceeds the $0.50 budget. A medium+small combo ($0.60) is cheaper but risks overload. The agent must balance cost vs. reliability.
-
----
-
-### Task 3: Fleet Chaos Triage
+### Task 3: Fleet Chaos Triage (Hard)
 
 | | |
 |---|---|
-| **Difficulty** | 🔴 Hard |
 | **Max Steps** | 15 |
-| **Budget** | $0.80/hr |
-| **Objective** | Fix a broken fleet — 3 SLA breaches, 1 orphaned workload, 1 idle server, massive over-provisioning |
+| **Budget** | $1.20/hr |
+| **Objective** | Fix a broken fleet — 3 SLA breaches, 1 orphaned workload, cascading failures (wl-api→wl-auth, wl-search→wl-db), 1 idle server |
 
-**Starting state (the mess):**
+**Optimal:** Consolidate onto `large` + `medium` ($1.20/hr). Requires 8–12 carefully ordered actions.
 
-| Server | Type | Cost | Status |
-|---|---|---|---|
-| srv-001 | medium | $0.40 | **OVERLOADED** — 2 critical workloads, both breaching SLA |
-| srv-002 | large | $0.80 | OK but oversized — 1 workload using 25% capacity |
-| srv-003 | nano | $0.05 | **UNDERSIZED** — workload needs 2 GB RAM, server has 1 GB |
-| srv-004 | medium | $0.40 | **COMPLETELY IDLE** — no workloads, pure waste |
-| srv-005 | nano | $0.05 | OK — right-sized for metrics collector |
+### Task 4: Procedural Generation (Variable)
 
-Total cost: $1.70/hr. Budget: $0.80/hr. 3 SLA violations. 1 orphaned workload (`wl-ml-jobs`).
+```bash
+curl -X POST http://localhost:7860/reset \
+  -d '{"task_id": "random", "seed": 42}'
+```
 
-**What a good agent does:** (requires 8–12 carefully ordered actions)
-1. Migrate `wl-api` off overloaded `srv-001` to idle `srv-004`
-2. Migrate `wl-search` off undersized `srv-003` to a capable server
-3. Assign orphaned `wl-ml-jobs` to a server with capacity
-4. Terminate or resize waste servers
-5. Right-size remaining fleet to cut cost
-
-**Why it's hard:** Every action has dependencies. You can't terminate before migrating. You can't migrate to a full server. The total resource demand (10.5 CPU, 15.5 GB) exceeds the cheapest single-server option. Even GPT-4/Claude struggle to plan the full sequence correctly.
+Generates a unique fleet configuration from the seed. Server count (3–7), workload count (4–8), resource requirements, dependencies, and budget are all randomized. Same seed always produces the same scenario.
 
 ---
 
-## 6. Local Setup
+## 7. Local Setup
 
 ```bash
-# 1. Clone the repository
-git clone <repo-url>
-cd <repo-dir>
+# 1. Clone and set up
+git clone <repo-url> && cd <repo-dir>
+python -m venv venv && source venv/bin/activate  # or .\venv\Scripts\activate on Windows
+pip install -r requirements.txt
 
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# OR
-.\venv\Scripts\activate   # Windows
+# 2. Run tests
+python test_env.py
 
-# 3. Install dependencies
-pip install fastapi uvicorn pydantic openai requests
-
-# 4. Start the environment server
+# 3. Start environment
 python env.py
 # Server starts at http://localhost:7860
 
-# 5. Test it (in another terminal)
-curl -X POST http://localhost:7860/reset \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": "easy"}'
+# 4. Test (separate terminal)
+curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d '{"task_id": "easy"}'
+
+# 5. View dashboard
+# Open http://localhost:7860/dashboard?session_id=YOUR_SESSION_ID
 ```
 
 ---
 
-## 7. Docker Setup
+## 8. Docker Setup
 
 ```bash
-# Build the image
 docker build -t openenv-devops .
-
-# Run the container
 docker run -p 7860:7860 openenv-devops
-
-# Verify it's running
-curl -X POST http://localhost:7860/reset \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": "easy"}'
+curl -X POST http://localhost:7860/reset -d '{"task_id": "easy"}'
 ```
-
-The container runs as a non-root user on port 7860 (HuggingFace Spaces default).
 
 ---
 
-## 8. Running Inference
-
-The baseline agent uses an LLM to play all 3 tasks:
+## 9. Running Inference
 
 ```bash
-# Set environment variables
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 export HF_TOKEN="hf_your_token_here"
-export ENV_URL="http://localhost:7860"  # or your HF Space URL
-
-# Make sure the environment server is running, then:
+export ENV_URL="http://localhost:7860"
 python inference.py
 ```
 
-**Windows PowerShell:**
-
-```powershell
-$env:API_BASE_URL="https://router.huggingface.co/v1"
-$env:MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
-$env:HF_TOKEN="hf_your_token_here"
-$env:ENV_URL="http://localhost:7860"
-python inference.py
-```
-
-Typical runtime: **2–3 minutes** on 2 vCPU / 8 GB RAM (well under the 20-minute limit).
+Typical runtime: **2–3 minutes** on 2 vCPU / 8 GB RAM.
 
 ---
 
-## 9. Baseline Scores
+## 10. Baseline Scores
 
-| Task | Difficulty | Max Steps | Budget | Baseline Score | Random Agent Score |
+| Task | Difficulty | Max Steps | Budget | Baseline (LLM) | Random Agent |
 |---|---|---|---|---|---|
-| Single Server Rightsizing | 🟢 Easy | 5 | $0.20/hr | 0.80–0.85 | ~0.30–0.40 |
-| Multi-Service Consolidation | 🟡 Medium | 10 | $0.50/hr | 0.40–0.55 | ~0.15–0.25 |
-| Fleet Chaos Triage | 🔴 Hard | 15 | $0.80/hr | 0.15–0.30 | ~0.05–0.15 |
+| Single Server Rightsizing | 🟢 Easy | 5 | $0.25/hr | 0.65–0.75 | ~0.15–0.30 |
+| Multi-Service Consolidation | 🟡 Medium | 10 | $0.50/hr | 0.40–0.55 | ~0.10–0.20 |
+| Fleet Chaos Triage | 🔴 Hard | 15 | $1.20/hr | 0.25–0.40 | ~0.05–0.15 |
 
-- **Baseline** = LLM agent (e.g. Llama-3.1-8B-Instruct) using the system prompt in `inference.py`
-- **Random agent** = uniformly random valid actions
-- All scores are deterministic: same actions → same score, always
-
----
-
-## 10. OpenEnv Validation
-
-```bash
-# Install the OpenEnv CLI
-pip install openenv-core
-
-# Validate the environment spec
-openenv validate
-
-# Test that the server responds correctly
-curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7860/reset
-# Expected: 200
-```
+All scores are deterministic: same actions → same score, always.
 
 ---
 
@@ -334,16 +276,18 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7860/reset
 
 | Endpoint | Method | Body | Returns |
 |---|---|---|---|
-| `/reset` | POST | `{"task_id": "easy\|medium\|hard"}` | Initial `Observation` |
-| `/step` | POST | `Action` JSON | `{observation, reward, done, info}` |
-| `/state` | GET | — | Full current state including action history |
+| `/reset` | POST | `{"task_id": "easy\|medium\|hard\|random", "seed": <int>}` | `{session_id, ...Observation}` |
+| `/step` | POST | `Action JSON` + `?session_id=ID` | `{observation, reward, done, info}` |
+| `/state` | GET | `?session_id=ID` | Full state with action history |
+| `/dashboard` | GET | `?session_id=ID` | Live HTML dashboard |
 
 ---
 
 ## Technical Stack
 
 - **Python 3.11** + **FastAPI** + **Pydantic v2** + **uvicorn**
-- **OpenAI client** for LLM inference (compatible with any OpenAI-format API)
+- **OpenAI client** for LLM inference (any OpenAI-format API)
 - **Zero ML dependencies** in the environment itself
 - **Fully deterministic** grading — no randomness anywhere
-- **Single-file environment** (`env.py`) — models, tasks, grading, and server in one place
+- **Single-file environment** (`env.py`) — models, tasks, grading, server, and dashboard
+- **14 test suites** (`test_env.py`) with 50+ assertions covering all mechanics
