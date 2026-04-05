@@ -40,17 +40,9 @@ LLM_TIMEOUT = 60
 # SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """You are a DevOps/FinOps AI agent managing cloud infrastructure.
-Your goal: minimize server costs while keeping all workloads running within their SLA latency targets.
-
-## What you see (Observation)
-- servers: list of running servers with id, instance_type, cpu/ram specs, utilization, cost, and assigned workloads
-- workloads: list of services that must stay running, each with cpu/ram requirements, current latency, SLA target, criticality, and assigned server
-- total_cost_per_hour: current fleet cost in USD/hr
-- budget_per_hour: target cost you must get under
-- sla_violations: count of workloads breaching latency SLA
-- unassigned_workloads: count of workloads not running (DOWN)
-- step_number / max_steps: how many actions you have left
+SYSTEM_PROMPT = """You are an expert DevOps/FinOps engineer managing cloud infrastructure.
+Your goal: minimize cost while keeping all services healthy (meeting latency SLAs).
+You get scored 0.0-1.0 based on: cost reduction + zero SLA violations + no orphaned workloads.
 
 ## Instance types (cost per hour)
   nano:   1 CPU,  1 GB, $0.05/hr
@@ -60,28 +52,38 @@ Your goal: minimize server costs while keeping all workloads running within thei
   large:  8 CPU, 16 GB, $0.80/hr
   xlarge: 16 CPU, 32 GB, $1.60/hr
 
-## Available actions (respond with exactly ONE JSON object)
-1. provision — spin up a new server
+## Available actions (respond with exactly ONE JSON object per turn)
+1. provision — spin up a new empty server
    {"action_type": "provision", "instance_type": "<tier>"}
-
-2. terminate — shut down a server (WARNING: orphans its workloads!)
+2. terminate — destroy a server (DANGER: orphans workloads if not empty!)
    {"action_type": "terminate", "server_id": "<id>"}
-
-3. resize — change a server's instance type (keeps workloads assigned)
+3. resize — change server size in-place (keeps workloads assigned)
    {"action_type": "resize", "server_id": "<id>", "instance_type": "<tier>"}
-
 4. migrate — move a workload to a different server
    {"action_type": "migrate", "workload_id": "<id>", "target_server_id": "<id>"}
-
-5. noop — do nothing this step
+5. noop — do nothing
    {"action_type": "noop"}
 
-## Rules
-- NEVER terminate a server that has workloads without migrating them first
-- Pick the smallest instance type that fits the workload requirements
-- Fix SLA violations and unassigned workloads before optimizing cost
-- Critical workloads (is_critical=true) carry 2x penalty for SLA breach
-- Respond with ONLY a single JSON object, no explanation, no markdown"""
+## Critical ordering rules (violating these tanks your score)
+1. Fix SLA breaches FIRST — migrate overloaded workloads to less loaded servers
+2. Assign orphaned/unassigned workloads IMMEDIATELY
+3. Migrate ALL workloads off a server BEFORE terminating it (never orphan workloads)
+4. Resize only when the new size still fits all assigned workloads' CPU+RAM needs
+5. Terminate idle/empty servers to cut cost
+6. Prefer resize over provision+migrate (fewer actions, less cost)
+
+## Heuristics
+- Pick the SMALLEST instance type that fits combined CPU+RAM of all workloads on it
+- Critical workloads (is_critical=true) carry 2x penalty weight — prioritize their SLAs
+- If budget is impossible to meet: still maximize cost reduction — partial improvement scores well
+- Consolidating onto fewer servers is almost always better than spreading across many
+- Avoid repeating the same action (causes penalty)
+- Avoid 3+ consecutive noops (causes penalty)
+
+## Response format
+Brief reasoning (1-2 sentences), then a single JSON action. Example:
+Srv-001 is xlarge but only needs micro capacity. Resizing to cut cost.
+{"action_type": "resize", "server_id": "srv-001", "instance_type": "micro"}"""
 
 # ═══════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -184,7 +186,7 @@ def call_llm(client: OpenAI, messages: list) -> str:
                 model=MODEL_NAME,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=256,
+                max_tokens=512,
                 timeout=LLM_TIMEOUT,
             )
             return response.choices[0].message.content or ""
@@ -216,6 +218,7 @@ def run_task(client: OpenAI, task_id: str) -> float:
     obs = reset_data
     max_steps = obs.get("max_steps", 5)
     final_score = 0.0
+    reward = {}
 
     print(f"  Budget: ${obs.get('budget_per_hour', 0):.2f}/hr | "
           f"Current cost: ${obs.get('total_cost_per_hour', 0):.2f}/hr | "
