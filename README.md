@@ -290,4 +290,4 @@ All scores are deterministic: same actions → same score, always.
 - **Zero ML dependencies** in the environment itself
 - **Fully deterministic** grading — no randomness anywhere
 - **Single-file environment** (`env.py`) — models, tasks, grading, server, and dashboard
-- **77 unit tests** (`test_env.py`) covering all mechanics
+- **14 test suites** (`test_env.py`) with 50+ assertions covering all mechanics

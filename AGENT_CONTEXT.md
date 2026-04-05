@@ -38,7 +38,7 @@ Judging: Real-world utility 30%, Task quality 25%, Env design 20%,
 project-root/
 ├── env.py                  # ALL-IN-ONE: models + tasks + graders + dashboard + FastAPI
 ├── inference.py            # baseline LLM agent (mandatory name + location)
-├── test_env.py             # 77 unit tests covering all mechanics
+├── test_env.py             # 14 test suites with 50+ assertions
 ├── openenv.yaml            # environment manifest (spec_version: 1)
 ├── Dockerfile              # python:3.11-slim, non-root user, port 7860
 ├── requirements.txt        # 5 project-specific packages
@@ -124,7 +124,7 @@ project-root/
 [x] GET /state returns full state
 [x] GET /dashboard returns live HTML dashboard
 [x] All graders return float 0.0–1.0, fully deterministic
-[x] Graders return DIFFERENT scores for different inputs (verified 77 tests)
+[x] Graders return DIFFERENT scores for different inputs (verified in tests)
 [x] 11 instance types including spot and specialized
 [x] 4 resource dimensions (CPU, RAM, disk IOPS, network)
 [x] Spot eviction at steps 3/7/12 (deterministic)
