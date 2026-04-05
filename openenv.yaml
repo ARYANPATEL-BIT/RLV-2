@@ -1,0 +1,142 @@
+# openenv.yaml — Environment manifest for DevOps/FinOps OpenEnv
+# Validated with: openenv validate
+
+spec_version: 1
+
+name: devops-finops-cloud-optimizer
+version: "1.0.0"
+description: >
+  AI agent environment for cloud infrastructure cost vs performance optimization.
+  Agents manage a simulated fleet of cloud servers, making decisions about
+  provisioning, termination, resizing, and workload migration to minimize cost
+  while maintaining performance SLAs.
+author: "aryanpatel"
+tags:
+  - openenv
+  - devops
+  - finops
+  - cloud-optimization
+  - reinforcement-learning
+
+docker_port: 7860
+
+# ── Tasks ──────────────────────────────────────────────────────────────
+
+tasks:
+  - id: easy
+    name: "Single Server Rightsizing"
+    description: >
+      A single workload runs on a massively over-provisioned xlarge server.
+      Resize or replace it with the smallest instance that meets the workload's
+      needs to bring cost under budget ($0.20/hr).
+    difficulty: easy
+    max_steps: 5
+
+  - id: medium
+    name: "Multi-Service Consolidation"
+    description: >
+      Four workloads each run on their own oversized server (total $2.40/hr).
+      Consolidate onto fewer, right-sized servers to cut cost below budget
+      ($0.50/hr) while keeping all SLAs met.
+    difficulty: medium
+    max_steps: 10
+
+  - id: hard
+    name: "Fleet Chaos Triage"
+    description: >
+      Diagnose and fix a broken fleet with 3 SLA breaches, 1 orphaned workload,
+      1 idle server, and massive over-provisioning ($1.70/hr vs $0.80/hr budget).
+      Achieve zero downtime, zero SLA breaches, and cost under budget.
+    difficulty: hard
+    max_steps: 15
+
+# ── Observation Space ──────────────────────────────────────────────────
+
+observation_space:
+  servers:
+    type: "List[ServerInfo]"
+    description: "All active server instances in the fleet"
+    fields:
+      server_id: "Unique server identifier (e.g. 'srv-001')"
+      instance_type: "Instance tier: nano/micro/small/medium/large/xlarge"
+      cpu_cores: "Number of vCPU cores"
+      ram_gb: "RAM in GB"
+      cpu_utilization: "Current CPU usage 0.0-1.0"
+      ram_utilization: "Current RAM usage 0.0-1.0"
+      cost_per_hour: "Hourly cost in USD"
+      assigned_workloads: "List of workload IDs running on this server"
+
+  workloads:
+    type: "List[WorkloadInfo]"
+    description: "All workloads that must be kept running"
+    fields:
+      workload_id: "Unique workload identifier (e.g. 'wl-api')"
+      name: "Human-readable workload name"
+      required_cpu: "Minimum CPU cores needed"
+      required_ram: "Minimum RAM in GB needed"
+      current_latency_ms: "Current p95 response latency in ms"
+      sla_latency_ms: "Maximum acceptable p95 latency before SLA breach"
+      is_critical: "If true, SLA breach carries 2x penalty weight"
+      assigned_server: "Server ID where workload runs, or null if unassigned"
+
+  total_cost_per_hour:
+    type: float
+    description: "Sum of all running server costs in USD/hr"
+
+  budget_per_hour:
+    type: float
+    description: "Target budget the agent should optimize toward in USD/hr"
+
+  sla_violations:
+    type: int
+    description: "Count of workloads currently breaching their latency SLA"
+
+  unassigned_workloads:
+    type: int
+    description: "Count of workloads not running on any server (effectively DOWN)"
+
+  step_number:
+    type: int
+    description: "Current step in the episode (0-indexed)"
+
+  max_steps:
+    type: int
+    description: "Maximum steps allowed before episode ends"
+
+  done:
+    type: bool
+    description: "True if the episode is over"
+
+  message:
+    type: str
+    description: "Human-readable feedback about the last action's effect"
+
+# ── Action Space ───────────────────────────────────────────────────────
+
+action_space:
+  action_type:
+    type: "Literal['provision', 'terminate', 'resize', 'migrate', 'noop']"
+    description: "The infrastructure operation to perform"
+
+  server_id:
+    type: "Optional[str]"
+    description: "Target server for terminate/resize actions"
+
+  instance_type:
+    type: "Optional[Literal['nano','micro','small','medium','large','xlarge']]"
+    description: "Instance tier for provision/resize actions"
+
+  workload_id:
+    type: "Optional[str]"
+    description: "Workload to move for migrate actions"
+
+  target_server_id:
+    type: "Optional[str]"
+    description: "Destination server for migrate actions"
+
+# ── Reward ─────────────────────────────────────────────────────────────
+
+reward_range: [0.0, 1.0]
+reward_formula: >
+  score = (cost_efficiency * 0.50) + (performance_score * 0.40) - (penalty * 0.10)
+  Clamped to [0.0, 1.0]. Partial credit across full trajectory.
