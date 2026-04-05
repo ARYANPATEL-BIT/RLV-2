@@ -1,0 +1,29 @@
+# OpenEnv Course — Python dependencies
+#
+# Install everything needed to run all 5 modules:
+#   pip install -r requirements.txt
+#
+# GPU (A100 40GB) is only required for Module 5 (GRPO training).
+
+# Core OpenEnv framework
+openenv-core>=0.2.2
+
+# Server-side dependencies (needed to run environments locally in Module 3)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+fastmcp>=3.0.0
+pydantic>=2.0.0
+
+# Module 5: LLM training
+trl>=0.17.0
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+# vllm           # Uncomment for Module 5 (requires CUDA + Linux)
+# bitsandbytes   # Uncomment for Module 5 quantisation
+
+# Experiment tracking (Module 5)
+trackio
+
+# HF Hub utilities
+huggingface-hub>=0.22.0
