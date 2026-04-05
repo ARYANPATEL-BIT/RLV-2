@@ -13,7 +13,7 @@ Port:  7860 (HuggingFace Spaces default)
 from __future__ import annotations
 
 import copy
-import hashlib
+
 import random
 import threading
 import time
@@ -112,7 +112,7 @@ class Observation(BaseModel):
 class Action(BaseModel):
     action_type: Literal["provision", "terminate", "resize", "migrate", "noop"]
     server_id: Optional[str] = None
-    instance_type: Optional[str] = None
+    instance_type: Optional[ALL_INSTANCE_TYPES] = None
     workload_id: Optional[str] = None
     target_server_id: Optional[str] = None
 
@@ -538,6 +538,21 @@ def _build_random_state(seed: int):
             is_critical=crit, assigned_server=srv, dependencies=deps,
         ))
 
+    # Solvability check: ensure total demand doesn't exceed 2x total capacity
+    total_cpu_demand = sum(w.required_cpu for w in workloads)
+    total_ram_demand = sum(w.required_ram for w in workloads)
+    total_cpu_cap = sum(s.cpu_cores for s in servers)
+    total_ram_cap = sum(s.ram_gb for s in servers)
+    if total_cpu_demand > 2 * total_cpu_cap or total_ram_demand > 2 * total_ram_cap:
+        # Add a large server to make the task feasible
+        spec = INSTANCE_CATALOG["large"]
+        servers.append(ServerInfo(
+            server_id=f"srv-{len(servers)+1:03d}", instance_type="large",
+            cpu_cores=spec["cpu"], ram_gb=spec["ram"],
+            disk_iops=spec["disk_iops"], network_gbps=spec["net_gbps"],
+            cost_per_hour=spec["cost"], is_spot=False,
+        ))
+
     total_cost = sum(s.cost_per_hour for s in servers)
     budget = round(total_cost * rng.uniform(0.4, 0.65), 2)
     max_steps = rng.choice([8, 10, 12, 15])
@@ -600,13 +615,13 @@ class CloudEnvironment:
         traffic_active = self.seed is not None
         for srv in self.servers:
             wls = self._workloads_on_server(srv.server_id)
-            mult = 1.0
-            if traffic_active:
-                mult = _get_traffic_multiplier(self.seed, self.step_number, srv.server_id)
-            tc = sum(w.required_cpu * mult for w in wls)
-            tr = sum(w.required_ram * mult for w in wls)
-            td = sum(w.required_disk_iops * mult for w in wls)
-            tn = sum(w.required_net_gbps * mult for w in wls)
+            tc, tr, td, tn = 0.0, 0.0, 0.0, 0.0
+            for w in wls:
+                m = _get_traffic_multiplier(self.seed, self.step_number, w.workload_id) if traffic_active else 1.0
+                tc += w.required_cpu * m
+                tr += w.required_ram * m
+                td += w.required_disk_iops * m
+                tn += w.required_net_gbps * m
             srv.cpu_utilization = round(tc / srv.cpu_cores, 4) if srv.cpu_cores > 0 else 0.0
             srv.ram_utilization = round(tr / srv.ram_gb, 4) if srv.ram_gb > 0 else 0.0
             srv.disk_utilization = round(td / srv.disk_iops, 4) if srv.disk_iops > 0 else 0.0
@@ -625,7 +640,8 @@ class CloudEnvironment:
                 wl.current_latency_ms = 0.0
                 continue
             wls_on = self._workloads_on_server(srv.server_id)
-            mult = _get_traffic_multiplier(self.seed, self.step_number, srv.server_id) if self.seed else 1.0
+            # Per-workload traffic multiplier: use the workload's own ID for the hash
+            mult = _get_traffic_multiplier(self.seed, self.step_number, wl.workload_id) if self.seed else 1.0
             wl.current_latency_ms = _simulate_latency(
                 wl, srv.cpu_cores, srv.ram_gb, srv.disk_iops, srv.network_gbps,
                 wls_on, mult,
