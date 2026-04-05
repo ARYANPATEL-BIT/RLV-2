@@ -51,14 +51,8 @@ tasks:
     difficulty: hard
     max_steps: 15
 
-  - id: random
-    name: "Procedural Generation"
-    description: >
-      Randomly generated fleet configuration using a seed parameter.
-      Server count, workload requirements, dependencies, and budget
-      are all procedurally determined. Use seed for reproducibility.
-    difficulty: variable
-    max_steps: variable
+# NOTE: Procedural generation is also supported via task_id="random" + seed parameter.
+# This generates unique fleet configurations for unlimited evaluation scenarios.
 
 # ── Observation Space ──────────────────────────────────────────────────
 

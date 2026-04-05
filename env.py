@@ -112,7 +112,7 @@ class Observation(BaseModel):
 class Action(BaseModel):
     action_type: Literal["provision", "terminate", "resize", "migrate", "noop"]
     server_id: Optional[str] = None
-    instance_type: Optional[ALL_INSTANCE_TYPES] = None
+    instance_type: Optional[str] = None
     workload_id: Optional[str] = None
     target_server_id: Optional[str] = None
 
