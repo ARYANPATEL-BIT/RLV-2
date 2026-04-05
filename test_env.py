@@ -57,12 +57,12 @@ def test_cost_efficiency():
     print("\n═══ Cost Efficiency ═══")
     budget = 0.50
     check("At zero cost → 1.0", _compute_cost_efficiency(0.0, budget) == 1.0)
-    check("At budget → 0.80", _compute_cost_efficiency(budget, budget) == 0.80)
+    check("At budget → 0.90", _compute_cost_efficiency(budget, budget) == 0.90)
     check("Under budget > at budget",
           _compute_cost_efficiency(0.25, budget) > _compute_cost_efficiency(budget, budget))
     check("Over budget < at budget",
           _compute_cost_efficiency(0.80, budget) < _compute_cost_efficiency(budget, budget))
-    check("At 3x budget → 0.0", _compute_cost_efficiency(1.50, budget) == 0.0)
+    check("At 2x budget → 0.0", _compute_cost_efficiency(1.00, budget) == 0.0)
     check("Monotonically decreasing",
           _compute_cost_efficiency(0.10, budget) >
           _compute_cost_efficiency(0.30, budget) >

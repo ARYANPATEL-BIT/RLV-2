@@ -66,12 +66,14 @@ project-root/
 ### Reward formula
   score = ce×0.40 + perf×0.35 - pen×0.25
   Clamped [0, 1]. If perf=0, ce is zeroed (documented).
+  Cost efficiency: 1.0 at zero cost, 0.90 at budget, 0.0 at 2x budget.
 
 ### Penalty amounts
-  Repeated action: +0.10 per repeat
+  Repeated non-noop action: +0.15 per repeat
   Destructive termination: +0.50 per occurrence (severe!)
-  3+ trailing noops: +0.05 per noop beyond 2
+  All-noop idleness: +0.05 per noop beyond 2 (only if agent did NOTHING useful)
   2+ provisions no migration: +0.10
+  Consecutive non-noop loop (3+): +0.10 per iteration
 
 ### Novel mechanics
   1. Spot eviction: at steps 3, 7, 12. Hash-based, 40% per spot server.
@@ -131,7 +133,7 @@ project-root/
 [x] Procedural task generation via task_id="random" + seed
 [x] Session management with auto-cleanup
 [x] inference.py handles sessions, new instance types, new mechanics
-[x] test_env.py has 77 passing tests
+[x] test_env.py has 14 test suites with 50+ assertions
 [x] openenv.yaml has all new fields documented
 [x] Dockerfile uses python:3.11-slim, non-root user, port 7860
 [x] requirements.txt has only project-specific packages
@@ -145,5 +147,5 @@ project-root/
 ## Current status
 
 [x] All 23 review fixes implemented
-[x] 77 tests passing
+[x] 14 test suites passing (50+ assertions)
 [x] Ready for submission

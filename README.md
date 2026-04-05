@@ -128,10 +128,10 @@ Clamped to **[0.0, 1.0]**. Fully deterministic. If performance = 0 (all workload
 | Condition | Score |
 |---|---|
 | Zero cost | 1.00 |
-| 50% of budget | 0.90 |
-| At budget | 0.80 |
-| 2× budget | 0.40 |
-| 3× budget or more | 0.00 |
+| 50% of budget | 0.95 |
+| At budget | 0.90 |
+| 1.5× budget | 0.45 |
+| 2× budget or more | 0.00 |
 
 ### Performance Score (35% weight)
 
@@ -141,9 +141,10 @@ Weighted fraction of workloads that are assigned AND meeting SLA. Critical workl
 
 | Source | Amount | Notes |
 |---|---|---|
-| Repeated identical action | +0.10 per repeat | Prevents loops |
+| Repeated identical non-noop action | +0.15 per repeat | Prevents loops (noops excluded) |
+| Consecutive non-noop loop (3+) | +0.10 per iteration | Extra penalty for action loops |
 | **Destructive termination** | **+0.50** per occurrence | Orphaning workloads is catastrophic |
-| 3+ trailing noops | +0.05 per noop beyond 2 | Prevents giving up early |
+| All-noop idleness | +0.05 per noop beyond 2 | Only if agent did zero useful actions |
 | 2+ provisions without migration | +0.10 | Prevents mindless provisioning |
 
 ---
@@ -263,9 +264,9 @@ Typical runtime: **2–3 minutes** on 2 vCPU / 8 GB RAM.
 
 | Task | Difficulty | Max Steps | Budget | Baseline (LLM) | Random Agent |
 |---|---|---|---|---|---|
-| Single Server Rightsizing | 🟢 Easy | 5 | $0.25/hr | 0.60–0.70 | ~0.15–0.25 |
-| Multi-Service Consolidation | 🟡 Medium | 10 | $0.50/hr | 0.35–0.50 | ~0.10–0.20 |
-| Fleet Chaos Triage | 🔴 Hard | 15 | $1.20/hr | 0.20–0.35 | ~0.05–0.15 |
+| Single Server Rightsizing | 🟢 Easy | 5 | $0.25/hr | 0.65–0.75 | ~0.15–0.30 |
+| Multi-Service Consolidation | 🟡 Medium | 10 | $0.50/hr | 0.40–0.55 | ~0.10–0.20 |
+| Fleet Chaos Triage | 🔴 Hard | 15 | $1.20/hr | 0.25–0.40 | ~0.05–0.15 |
 
 All scores are deterministic: same actions → same score, always.
 

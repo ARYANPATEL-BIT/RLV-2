@@ -204,10 +204,10 @@ def _compute_cost_efficiency(total_cost: float, budget: float) -> float:
     if total_cost <= 0:
         return 1.0
     if total_cost <= budget:
-        return 0.80 + 0.20 * (1.0 - total_cost / budget)
+        return 0.90 + 0.10 * (1.0 - total_cost / budget)
     else:
         overspend = (total_cost - budget) / budget
-        return max(0.0, 0.80 - 0.40 * overspend)
+        return max(0.0, 0.90 - 0.45 * overspend)
 
 
 def _compute_performance_score(workloads: List[WorkloadInfo]) -> float:
