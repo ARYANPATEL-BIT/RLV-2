@@ -225,30 +225,42 @@ def _compute_performance_score(workloads: List[WorkloadInfo]) -> float:
 
 def _compute_penalty(action_history: List[Action], destructive_count: int) -> float:
     penalty = 0.0
-    # Repeated identical actions
-    if len(action_history) >= 2:
+    non_noop_actions = [a for a in action_history if a.action_type != "noop"]
+    # Repeated identical NON-NOOP actions (noops excluded — they're valid idle)
+    if len(non_noop_actions) >= 2:
         seen: Dict[tuple, int] = {}
-        for act in action_history:
+        for act in non_noop_actions:
             key = (act.action_type, act.server_id, act.instance_type,
                    act.workload_id, act.target_server_id)
             seen[key] = seen.get(key, 0) + 1
-        for count in seen.values():
+        for key, count in seen.items():
             if count > 1:
-                penalty += 0.1 * (count - 1)
+                penalty += 0.15 * (count - 1)
+    # Consecutive identical NON-NOOP actions (loop detection — extra penalty)
+    if len(action_history) >= 3:
+        consecutive = 1
+        for i in range(1, len(action_history)):
+            prev = action_history[i - 1]
+            curr = action_history[i]
+            same = (prev.action_type == curr.action_type and prev.server_id == curr.server_id
+                    and prev.instance_type == curr.instance_type
+                    and prev.workload_id == curr.workload_id
+                    and prev.target_server_id == curr.target_server_id)
+            if same and curr.action_type != "noop":
+                consecutive += 1
+            else:
+                consecutive = 1
+            if consecutive >= 3:
+                penalty += 0.1  # extra penalty per loop iteration beyond 2
     # Destructive terminations — 0.50 each (severe)
     penalty += 0.50 * destructive_count
-    # Trailing noops
-    noop_tail = 0
-    for act in reversed(action_history):
-        if act.action_type == "noop":
-            noop_tail += 1
-        else:
-            break
-    if noop_tail >= 3:
-        penalty += 0.05 * (noop_tail - 2)
+    # All-noop penalty: if agent did NOTHING useful, penalize idleness
+    # But if agent took useful actions then stopped, trailing noops are fine
+    if len(non_noop_actions) == 0 and len(action_history) >= 3:
+        penalty += 0.05 * (len(action_history) - 2)
     # Provision spam
-    provisions = sum(1 for a in action_history if a.action_type == "provision")
-    migrations = sum(1 for a in action_history if a.action_type == "migrate")
+    provisions = sum(1 for a in non_noop_actions if a.action_type == "provision")
+    migrations = sum(1 for a in non_noop_actions if a.action_type == "migrate")
     if provisions >= 2 and migrations == 0:
         penalty += 0.1
     return min(penalty, 1.0)
