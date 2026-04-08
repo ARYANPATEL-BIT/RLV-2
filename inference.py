@@ -15,17 +15,14 @@ import sys
 import time
 import traceback
 
-try:
-    import requests
-except ImportError:
-    print("[FATAL] 'requests' package not installed. pip install requests", file=sys.stderr)
-    sys.exit(0)
+FATAL_IMPORT_ERROR = None
 
 try:
+    import requests
     from openai import OpenAI
-except ImportError:
-    print("[FATAL] 'openai' package not installed. pip install openai", file=sys.stderr)
-    sys.exit(0)
+except ImportError as ie:
+    FATAL_IMPORT_ERROR = f"IMPORT_ERROR_{ie}".replace(" ", "_")
+    # Will gracefully fail in main()
 
 # ═══════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -48,64 +45,48 @@ SYSTEM_PROMPT = """You are an expert DevOps/FinOps engineer managing cloud infra
 Your goal: minimize cost while keeping all services healthy (meeting latency SLAs).
 Score 0.0-1.0: cost_efficiency×0.40 + performance×0.35 - penalty×0.25.
 
-## Instance types (cost/hr)
-  nano:        1cpu,  1GB,  1k IOPS, 0.5Gbps, $0.05
-  micro:       1cpu,  2GB,  2k IOPS, 0.5Gbps, $0.10
-  small:       2cpu,  4GB,  3k IOPS, 1.0Gbps, $0.20
-  medium:      4cpu,  8GB,  5k IOPS, 2.0Gbps, $0.40
-  large:       8cpu, 16GB, 10k IOPS, 5.0Gbps, $0.80
-  xlarge:     16cpu, 32GB, 20k IOPS, 10Gbps,  $1.60
-  compute-opt: 8cpu,  8GB,  5k IOPS, 5.0Gbps, $0.60  (high CPU, low RAM)
-  memory-opt:  4cpu, 32GB, 10k IOPS, 2.0Gbps, $0.70  (high RAM)
-  storage-opt: 4cpu,  8GB, 30k IOPS, 2.0Gbps, $0.55  (high disk)
-  spot-medium: 4cpu,  8GB,  5k IOPS, 2.0Gbps, $0.12  (CHEAP but can be EVICTED!)
-  spot-large:  8cpu, 16GB, 10k IOPS, 5.0Gbps, $0.24  (CHEAP but can be EVICTED!)
-
 ## Actions (respond with exactly ONE JSON object per turn)
-1. provision: {"action_type": "provision", "instance_type": "<tier>"}
-2. terminate: {"action_type": "terminate", "server_id": "<id>"}  ← DANGER: orphans workloads!
-3. resize:    {"action_type": "resize", "server_id": "<id>", "instance_type": "<tier>"}
-4. migrate:   {"action_type": "migrate", "workload_id": "<id>", "target_server_id": "<id>"}
-5. noop:      {"action_type": "noop"}
-
-## Critical rules
-1. Fix SLA breaches FIRST — check ALL 4 dimensions: CPU, RAM, disk IOPS, network
-2. Assign orphaned workloads IMMEDIATELY
-3. Migrate ALL workloads off a server BEFORE terminating it
-4. Check workload DEPENDENCIES — if dependency is down/breaching, dependent cascades
-5. Spot instances evict at steps 3/7/12 — don't rely on them for critical workloads
-6. Resize keeps workloads — verify new size fits all workloads on it
-7. Destructive termination = 0.50 penalty (VERY expensive with 0.25 weight)
-8. Prefer resize over provision+migrate
-
-## Heuristics
-- Pick SMALLEST instance fitting combined CPU+RAM+disk+net of all workloads
-- Critical workloads carry 2x penalty weight — prioritize their SLAs
-- Consolidate onto fewer servers when possible
-- Never use spot instances for critical workloads
-- Context-switch overhead: +5% utilization per extra workload on same server
+1. provision: {"action_type":"provision","instance_type":"<tier>"}
+2. terminate: {"action_type":"terminate","server_id":"<id>"}
+3. resize:    {"action_type":"resize","server_id":"<id>","instance_type":"<tier>"}
+4. migrate:   {"action_type":"migrate","workload_id":"<id>","target_server_id":"<id>"}
+5. noop:      {"action_type":"noop"}
 
 ## Response format
-Brief reasoning (1-2 sentences), then a single JSON action:
-Srv-001 is xlarge but only needs small capacity. Resizing to cut cost.
-{"action_type": "resize", "server_id": "srv-001", "instance_type": "small"}"""
+Respond ONLY with a single JSON action"""
 
 # ═══════════════════════════════════════════════════════════════════════
-# LOGGING & HELPERS
+# LOGGING & HELPERS (STRICT FORMATTING)
 # ═══════════════════════════════════════════════════════════════════════
+
+def format_safe_string(text: str) -> str:
+    # Removes all spaces/newlines so key=value parser doesn't break
+    if not text:
+        return "null"
+    return str(text).replace(" ", "_").replace("\n", "_").replace("\r", "")
 
 def log_start(task: str, env: str, model: str):
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+    # e.g. [START] task=easy env=devops-finops model=Qwen...
+    # Make sure task, env, model don't contain raw spaces if passing them
+    t_safe = format_safe_string(task)
+    e_safe = format_safe_string(env)
+    m_safe = format_safe_string(model)
+    print(f"[START] task={t_safe} env={e_safe} model={m_safe}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
-    # Flatten action into a single line string to avoid breaking the format
-    action_str = action if isinstance(action, str) else json.dumps(action)
-    action_str = action_str.replace('\n', ' ').replace('\r', '')
-    
+    # Action string MUST HAVE NO SPACES. 
+    if isinstance(action, dict):
+        action_str = json.dumps(action, separators=(',', ':'))
+    else:
+        # If it's a string, strip all spaces
+        action_str = str(action).replace('\n', '').replace('\r', '').replace(' ', '')
+        if not action_str:
+            action_str = "noop"
+            
     done_str = str(done).lower()
-    error_str = error if error else "null"
+    error_safe = format_safe_string(error) if error else "null"
     
-    print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={done_str} error={error_str}", flush=True)
+    print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={done_str} error={error_safe}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: list):
     success_str = str(success).lower()
@@ -116,53 +97,8 @@ def log_end(success: bool, steps: int, score: float, rewards: list):
 
 
 def build_user_prompt(obs: dict) -> str:
-    lines = []
-    lines.append(f"Step {obs['step_number']}/{obs['max_steps']} | "
-                 f"Cost: ${obs['total_cost_per_hour']:.2f}/hr | "
-                 f"Budget: ${obs['budget_per_hour']:.2f}/hr | "
-                 f"SLA violations: {obs['sla_violations']} | "
-                 f"Unassigned: {obs['unassigned_workloads']}")
-    if obs.get("spot_eviction_occurred"):
-        lines.append("⚠️ SPOT EVICTION occurred this step!")
-    if obs.get("traffic_multiplier_active"):
-        lines.append("📈 Traffic spikes active (demand fluctuates each step)")
-    lines.append(f"Message: {obs['message']}")
-
-    lines.append("\n## Servers")
-    for s in obs["servers"]:
-        badges = ""
-        if s.get("is_spot"):
-            badges += " [SPOT]"
-        if s.get("is_overloaded"):
-            badges += " [OVERLOADED]"
-        lines.append(
-            f"  {s['server_id']} ({s['instance_type']}) "
-            f"CPU:{s['cpu_cores']}c@{s['cpu_utilization']:.0%} "
-            f"RAM:{s['ram_gb']}GB@{s['ram_utilization']:.0%} "
-            f"Disk:{s.get('disk_iops',0)}iops@{s.get('disk_utilization',0):.0%} "
-            f"Net:{s.get('network_gbps',0)}Gbps@{s.get('network_utilization',0):.0%} "
-            f"${s['cost_per_hour']}/hr "
-            f"wl: {s['assigned_workloads']}{badges}"
-        )
-
-    lines.append("\n## Workloads")
-    for w in obs["workloads"]:
-        status = "DOWN" if w["assigned_server"] is None else (
-            "BREACH" if w["current_latency_ms"] > w["sla_latency_ms"] else "OK"
-        )
-        crit = " [CRITICAL]" if w["is_critical"] else ""
-        deps = f" depends→{w['dependencies']}" if w.get("dependencies") else ""
-        lines.append(
-            f"  {w['workload_id']} \"{w['name']}\"{crit} "
-            f"needs {w['required_cpu']}cpu/{w['required_ram']}GB/"
-            f"{w.get('required_disk_iops',0)}iops/{w.get('required_net_gbps',0)}Gbps "
-            f"latency:{w['current_latency_ms']:.0f}ms/sla:{w['sla_latency_ms']:.0f}ms "
-            f"-> {status} on:{w['assigned_server'] or 'NONE'}{deps}"
-        )
-
-    lines.append("\nRespond with a single JSON action:")
-    return "\n".join(lines)
-
+    # Keeping minimal prompt logic to ensure no hallucinated strings
+    return f"Observation: {json.dumps(obs, separators=(',', ':'))}\nRespond with JSON action."
 
 def parse_action(text: str) -> dict:
     text = text.strip()
@@ -185,7 +121,7 @@ def parse_action(text: str) -> dict:
             return json.loads(text[brace_start:brace_end + 1])
         except json.JSONDecodeError:
             pass
-    print(f"    WARNING: Could not parse action, falling back to noop\nRaw response: {text[:200]}", file=sys.stderr)
+    print(f"    WARNING: Could not parse action\nRaw: {text[:50]}", file=sys.stderr)
     return {"action_type": "noop"}
 
 
@@ -203,33 +139,32 @@ def call_env(method: str, endpoint: str, body: dict = None, params: dict = None)
         return {}
 
 
-def call_llm(client: OpenAI, messages: list) -> str:
+def call_llm(client, messages: list) -> str:
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME, messages=messages,
                 temperature=0.0, max_tokens=512, timeout=LLM_TIMEOUT,
             )
-            return response.choices[0].message.content or ""
+            return response.choices[0].message.content or '{"action_type":"noop"}'
         except Exception as e:
-            print(f"    LLM ERROR (attempt {attempt + 1}/3): {e}", file=sys.stderr)
+            print(f"    LLM ERROR: {e}", file=sys.stderr)
             if attempt < 2:
-                time.sleep(2 ** attempt)
-    print("    LLM FAILED after 3 attempts, using noop", file=sys.stderr)
-    return '{"action_type": "noop"}'
+                time.sleep(1)
+    return '{"action_type":"noop"}'
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # MAIN INFERENCE LOOP
 # ═══════════════════════════════════════════════════════════════════════
 
-
-def run_task(client: OpenAI, task_id: str) -> float:
+def run_task(client, task_id: str) -> float:
+    # Always guarantee START logs first
     log_start(task=task_id, env="devops-finops-cloud-optimizer", model=MODEL_NAME)
 
     reset_data = call_env("POST", "/reset", {"task_id": task_id})
     if not reset_data:
-        log_step(step=1, action="", reward=0.0, done=True, error="ENV HTTP CONNECTION ERROR")
+        log_step(step=1, action="noop", reward=0.0, done=True, error="HTTP_CONNECTION_REFUSED")
         log_end(success=False, steps=1, score=0.0, rewards=[0.0])
         return 0.0
 
@@ -249,15 +184,11 @@ def run_task(client: OpenAI, task_id: str) -> float:
             break
 
         user_prompt = build_user_prompt(obs)
-        if action_log:
-            user_prompt += f"\n\n## Action History\nYou have taken {len(action_log)} actions so far:\n"
-            for past_step, (past_a, past_m) in enumerate(action_log):
-                user_prompt += f"  Step {past_step+1}: {past_a.get('action_type', '?')} -> {past_m[:70]}\n"
         messages.append({"role": "user", "content": user_prompt})
 
-        # Keep conversation manageable
-        if len(messages) > 13:
-            messages = [messages[0]] + messages[-12:]
+        # Keep context window tight
+        if len(messages) > 7:
+            messages = [messages[0]] + messages[-6:]
 
         raw_response = call_llm(client, messages)
         messages.append({"role": "assistant", "content": raw_response})
@@ -270,7 +201,7 @@ def run_task(client: OpenAI, task_id: str) -> float:
         reward_val = 0.0
 
         if not step_result:
-            error = "ENV ERROR"
+            error = "ENV_STEP_FAILED"
         else:
             obs = step_result.get("observation", obs)
             reward_dict = step_result.get("reward", {})
@@ -281,7 +212,9 @@ def run_task(client: OpenAI, task_id: str) -> float:
             action_log.append((action, info_msg))
 
         rewards.append(reward_val)
-        log_step(step=steps_taken, action=raw_response, reward=reward_val, done=done, error=error)
+        
+        # Log step with raw_response, but the log_step helper strips all spaces
+        log_step(step=steps_taken, action=action, reward=reward_val, done=done, error=error)
 
         if done:
             break
@@ -292,25 +225,35 @@ def run_task(client: OpenAI, task_id: str) -> float:
 
 
 def main():
-    try:
-        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "dummy-key")
-        scores = {}
-
-        for task_id in TASKS:
-            try:
-                score = run_task(client, task_id)
-            except Exception as e:
-                # Log graceful failure so parser reads it instead of crash
-                print(f"[START] task={task_id} env=devops-finops-cloud-optimizer model={MODEL_NAME}", flush=True)
-                print(f"[STEP] step=1 action=\"\" reward=0.00 done=true error=\"UNHANDLED_EXCEPTION: {str(e)}\"", flush=True)
-                print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
-                score = 0.0
-            scores[task_id] = score
-    except Exception as fatal_e:
-        # Ultimate fallback to prevent non-zero exit code
-        print(f"[START] task=fatal_error env=devops-finops-cloud-optimizer model={MODEL_NAME}", flush=True)
-        print(f"[STEP] step=1 action=\"\" reward=0.00 done=true error=\"FATAL_EXCEPTION: {str(fatal_e)}\"", flush=True)
+    if FATAL_IMPORT_ERROR:
+        print(f"[START] task=fatal_error env=devops-finops model={MODEL_NAME}", flush=True)
+        print(f"[STEP] step=1 action=noop reward=0.00 done=true error={FATAL_IMPORT_ERROR}", flush=True)
         print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
+        sys.exit(0)
+
+    try:
+        if "OpenAI" in globals():
+            client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "dummy-key")
+        else:
+            raise Exception("OpenAI not loaded")
+    except Exception as fatal_e:
+        err_str = format_safe_string(f"CLIENT_ERROR_{fatal_e}")
+        print(f"[START] task=error env=devops-finops model={MODEL_NAME}", flush=True)
+        print(f"[STEP] step=1 action=noop reward=0.00 done=true error={err_str}", flush=True)
+        print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
+        sys.exit(0)
+
+    scores = {}
+    for task_id in TASKS:
+        try:
+            score = run_task(client, task_id)
+        except Exception as e:
+            err_str = format_safe_string(f"UNHANDLED_{e}")
+            print(f"[START] task={task_id} env=devops-finops model={MODEL_NAME}", flush=True)
+            print(f"[STEP] step=1 action=noop reward=0.00 done=true error={err_str}", flush=True)
+            print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
+            score = 0.0
+        scores[task_id] = score
 
 
 if __name__ == "__main__":
