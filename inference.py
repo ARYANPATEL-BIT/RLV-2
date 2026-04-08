@@ -82,8 +82,17 @@ Srv-001 is xlarge but only needs small capacity. Resizing to cut cost.
 {"action_type": "resize", "server_id": "srv-001", "instance_type": "small"}"""
 
 # ═══════════════════════════════════════════════════════════════════════
-# HELPERS
+# LOGGING & HELPERS
 # ═══════════════════════════════════════════════════════════════════════
+
+def log_start(task: str, env: str, model: str):
+    print(f"[START] {json.dumps({'task': task, 'env': env, 'model': model})}", flush=True)
+
+def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
+    print(f"[STEP] {json.dumps({'step': step, 'action': action, 'reward': reward, 'done': done, 'error': error})}", flush=True)
+
+def log_end(success: bool, steps: int, score: float, rewards: list):
+    print(f"[END] {json.dumps({'success': success, 'steps': steps, 'score': score, 'rewards': rewards})}", flush=True)
 
 
 def build_user_prompt(obs: dict) -> str:
@@ -197,30 +206,24 @@ def call_llm(client: OpenAI, messages: list) -> str:
 
 
 def run_task(client: OpenAI, task_id: str) -> float:
-    print(f"\n{'=' * 60}")
-    print(f"TASK: {task_id.upper()}")
-    print(f"{'=' * 60}")
-
     reset_data = call_env("POST", "/reset", {"task_id": task_id})
     if not reset_data:
-        print(f"  Failed to reset task {task_id}")
         return 0.0
 
     session_id = reset_data.get("session_id")
     obs = reset_data
     max_steps = obs.get("max_steps", 5)
     final_score = 0.0
-    reward = {}
     action_log = []
+    rewards = []
 
-    print(f"  Session: {session_id}")
-    print(f"  Budget: ${obs.get('budget_per_hour', 0):.2f}/hr | "
-          f"Current cost: ${obs.get('total_cost_per_hour', 0):.2f}/hr | "
-          f"Max steps: {max_steps}")
+    log_start(task=task_id, env="devops-finops-cloud-optimizer", model=MODEL_NAME)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    steps_taken = 0
 
     for step_num in range(max_steps):
+        steps_taken = step_num + 1
         if obs.get("done", False):
             break
 
@@ -231,7 +234,7 @@ def run_task(client: OpenAI, task_id: str) -> float:
                 user_prompt += f"  Step {past_step+1}: {past_a.get('action_type', '?')} -> {past_m[:70]}\n"
         messages.append({"role": "user", "content": user_prompt})
 
-        # Keep conversation manageable (last 6 exchanges + system)
+        # Keep conversation manageable
         if len(messages) > 13:
             messages = [messages[0]] + messages[-12:]
 
@@ -239,87 +242,52 @@ def run_task(client: OpenAI, task_id: str) -> float:
         messages.append({"role": "assistant", "content": raw_response})
 
         action = parse_action(raw_response)
-        print(f"  Step {step_num + 1}/{max_steps}: {action.get('action_type', '?')}", end="")
-        for k in ["server_id", "instance_type", "workload_id", "target_server_id"]:
-            if action.get(k):
-                print(f" {k}={action[k]}", end="")
-
+        
         step_result = call_env("POST", "/step", action, {"session_id": session_id})
+        error = None
+        done = False
+        reward_val = 0.0
+
         if not step_result:
-            print(" -> ENV ERROR")
-            continue
+            error = "ENV ERROR"
+        else:
+            obs = step_result.get("observation", obs)
+            reward_dict = step_result.get("reward", {})
+            done = step_result.get("done", False)
+            final_score = reward_dict.get("score", 0.0)
+            reward_val = final_score
+            info_msg = step_result.get("info", {}).get("action_result", "")
+            action_log.append((action, info_msg))
 
-        obs = step_result.get("observation", obs)
-        reward = step_result.get("reward", {})
-        done = step_result.get("done", False)
-        final_score = reward.get("score", 0.0)
-        info_msg = step_result.get("info", {}).get("action_result", "")
-        action_log.append((action, info_msg))
-
-        print(f" -> score={final_score:.4f} | {info_msg[:70]}")
+        rewards.append(reward_val)
+        log_step(step=steps_taken, action=raw_response, reward=reward_val, done=done, error=error)
 
         if done:
             break
 
-    print(f"\n  FINAL SCORE: {final_score:.4f}")
-    print(f"  Cost efficiency: {reward.get('cost_efficiency', 0):.4f}")
-    print(f"  Performance:     {reward.get('performance_score', 0):.4f}")
-    print(f"  Penalty:         {reward.get('penalty', 0):.4f}")
+    success = final_score > 0.0  # Any partial credit is a minimal success
+    log_end(success=success, steps=steps_taken, score=final_score, rewards=rewards)
     return final_score
 
 
 def main():
-    print("=" * 60)
-    print("DevOps/FinOps OpenEnv v2.0 — Baseline Inference")
-    print("=" * 60)
-
     if not API_BASE_URL:
-        print("ERROR: API_BASE_URL environment variable not set")
         sys.exit(1)
     if not MODEL_NAME:
-        print("ERROR: MODEL_NAME environment variable not set")
         sys.exit(1)
     if not HF_TOKEN:
-        print("ERROR: HF_TOKEN environment variable not set")
         sys.exit(1)
-
-    print(f"  LLM endpoint: {API_BASE_URL}")
-    print(f"  Model:        {MODEL_NAME}")
-    print(f"  Env server:   {ENV_URL}")
 
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     scores = {}
-    start_time = time.time()
 
     for task_id in TASKS:
-        task_start = time.time()
         try:
             score = run_task(client, task_id)
         except Exception as e:
-            print(f"\n  TASK FAILED: {e}")
-            traceback.print_exc()
             score = 0.0
-        task_elapsed = time.time() - task_start
         scores[task_id] = score
-        print(f"  Time: {task_elapsed:.1f}s")
-
-    total_elapsed = time.time() - start_time
-
-    print(f"\n{'=' * 60}")
-    print("BASELINE SCORES SUMMARY")
-    print(f"{'=' * 60}")
-    print(f"{'Task':<12} {'Score':>8} {'Status':>10}")
-    print(f"{'-' * 12} {'-' * 8} {'-' * 10}")
-    for task_id in TASKS:
-        s = scores[task_id]
-        status = "PASS" if s > 0.0 else "FAIL"
-        print(f"{task_id:<12} {s:>8.4f} {status:>10}")
-    print(f"{'-' * 12} {'-' * 8} {'-' * 10}")
-    avg = sum(scores.values()) / len(scores)
-    print(f"{'AVERAGE':<12} {avg:>8.4f}")
-    print(f"\nTotal time: {total_elapsed:.1f}s")
-    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":
