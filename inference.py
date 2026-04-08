@@ -22,9 +22,9 @@ from openai import OpenAI
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "")
-MODEL_NAME = os.environ.get("MODEL_NAME", "")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+API_BASE_URL = os.environ.get("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.environ.get("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or ""
 ENV_URL = os.environ.get("ENV_URL", "http://localhost:7860")
 
 TASKS = ["easy", "medium", "hard"]
@@ -86,13 +86,24 @@ Srv-001 is xlarge but only needs small capacity. Resizing to cut cost.
 # ═══════════════════════════════════════════════════════════════════════
 
 def log_start(task: str, env: str, model: str):
-    print(f"[START] {json.dumps({'task': task, 'env': env, 'model': model})}", flush=True)
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
-    print(f"[STEP] {json.dumps({'step': step, 'action': action, 'reward': reward, 'done': done, 'error': error})}", flush=True)
+    # Flatten action into a single line string to avoid breaking the format
+    action_str = action if isinstance(action, str) else json.dumps(action)
+    action_str = action_str.replace('\n', ' ').replace('\r', '')
+    
+    done_str = str(done).lower()
+    error_str = error if error else "null"
+    
+    print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={done_str} error={error_str}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: list):
-    print(f"[END] {json.dumps({'success': success, 'steps': steps, 'score': score, 'rewards': rewards})}", flush=True)
+    success_str = str(success).lower()
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    if not rewards_str:
+        rewards_str = "0.00"
+    print(f"[END] success={success_str} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
 def build_user_prompt(obs: dict) -> str:
@@ -165,8 +176,7 @@ def parse_action(text: str) -> dict:
             return json.loads(text[brace_start:brace_end + 1])
         except json.JSONDecodeError:
             pass
-    print(f"    WARNING: Could not parse action, falling back to noop")
-    print(f"    Raw response: {text[:200]}")
+    print(f"    WARNING: Could not parse action, falling back to noop\nRaw response: {text[:200]}", file=sys.stderr)
     return {"action_type": "noop"}
 
 
@@ -180,7 +190,7 @@ def call_env(method: str, endpoint: str, body: dict = None, params: dict = None)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
-        print(f"    ENV ERROR: {e}")
+        print(f"    ENV ERROR: {e}", file=sys.stderr)
         return {}
 
 
@@ -193,10 +203,10 @@ def call_llm(client: OpenAI, messages: list) -> str:
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            print(f"    LLM ERROR (attempt {attempt + 1}/3): {e}")
+            print(f"    LLM ERROR (attempt {attempt + 1}/3): {e}", file=sys.stderr)
             if attempt < 2:
                 time.sleep(2 ** attempt)
-    print("    LLM FAILED after 3 attempts, using noop")
+    print("    LLM FAILED after 3 attempts, using noop", file=sys.stderr)
     return '{"action_type": "noop"}'
 
 
@@ -206,8 +216,12 @@ def call_llm(client: OpenAI, messages: list) -> str:
 
 
 def run_task(client: OpenAI, task_id: str) -> float:
+    log_start(task=task_id, env="devops-finops-cloud-optimizer", model=MODEL_NAME)
+
     reset_data = call_env("POST", "/reset", {"task_id": task_id})
     if not reset_data:
+        log_step(step=1, action="", reward=0.0, done=True, error="ENV HTTP CONNECTION ERROR")
+        log_end(success=False, steps=1, score=0.0, rewards=[0.0])
         return 0.0
 
     session_id = reset_data.get("session_id")
@@ -216,8 +230,6 @@ def run_task(client: OpenAI, task_id: str) -> float:
     final_score = 0.0
     action_log = []
     rewards = []
-
-    log_start(task=task_id, env="devops-finops-cloud-optimizer", model=MODEL_NAME)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     steps_taken = 0
@@ -271,23 +283,25 @@ def run_task(client: OpenAI, task_id: str) -> float:
 
 
 def main():
-    if not API_BASE_URL:
-        sys.exit(1)
-    if not MODEL_NAME:
-        sys.exit(1)
-    if not HF_TOKEN:
-        sys.exit(1)
+    try:
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "dummy-key")
+        scores = {}
 
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-
-    scores = {}
-
-    for task_id in TASKS:
-        try:
-            score = run_task(client, task_id)
-        except Exception as e:
-            score = 0.0
-        scores[task_id] = score
+        for task_id in TASKS:
+            try:
+                score = run_task(client, task_id)
+            except Exception as e:
+                # Log graceful failure so parser reads it instead of crash
+                print(f"[START] task={task_id} env=devops-finops-cloud-optimizer model={MODEL_NAME}", flush=True)
+                print(f"[STEP] step=1 action=\"\" reward=0.00 done=true error=\"UNHANDLED_EXCEPTION: {str(e)}\"", flush=True)
+                print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
+                score = 0.0
+            scores[task_id] = score
+    except Exception as fatal_e:
+        # Ultimate fallback to prevent non-zero exit code
+        print(f"[START] task=fatal_error env=devops-finops-cloud-optimizer model={MODEL_NAME}", flush=True)
+        print(f"[STEP] step=1 action=\"\" reward=0.00 done=true error=\"FATAL_EXCEPTION: {str(fatal_e)}\"", flush=True)
+        print(f"[END] success=false steps=1 score=0.00 rewards=0.00", flush=True)
 
 
 if __name__ == "__main__":
