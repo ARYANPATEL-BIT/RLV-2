@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
@@ -899,12 +900,32 @@ app = FastAPI(
     description="AI agent environment for cloud infrastructure cost vs. performance optimization.",
     version="2.0.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 sessions = SessionManager()
 
 
 @app.get("/")
 def health_check():
     return {"status": "ok", "environment": "devops-finops-cloud-optimizer", "version": "2.0.0"}
+
+@app.get("/info")
+def info_endpoint():
+    return {
+        "environment": "devops-finops-cloud-optimizer",
+        "version": "2.0.0",
+        "tasks": TASK_CONFIGS,
+        "instance_catalog": INSTANCE_CATALOG,
+        "reward_formula": "score = (cost_efficiency × 0.40) + (performance_score × 0.35) - (penalty × 0.25)",
+        "endpoints": ["/reset", "/step", "/state", "/info", "/dashboard"]
+    }
 
 
 @app.post("/reset")
