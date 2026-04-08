@@ -1,3 +1,12 @@
+---
+title: OpenEnv DevOps FinOps Cloud Optimizer
+emoji: ☁️
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # ☁️ OpenEnv: DevOps/FinOps Cloud Optimizer
 
 **An AI agent environment where models learn to optimize cloud infrastructure cost vs. performance under realistic operational constraints.**
