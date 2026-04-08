@@ -1,3 +1,19 @@
+---
+title: FinOps Cloud Optimizer Environment
+emoji: ☁️
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+app_port: 7860
+tags:
+  - openenv
+  - devops
+  - finops
+  - reinforcement-learning
+  - agents
+---
+
 # ☁️ DevOps/FinOps Cloud Optimizer — OpenEnv Environment
 
 **An AI agent environment where models learn to optimize cloud infrastructure cost vs. performance under realistic operational constraints.**
@@ -216,7 +232,7 @@ Generates a unique fleet configuration from the seed. Server count (3–7), work
 
 ```bash
 # 1. Clone and set up
-git clone <repo-url> && cd <repo-dir>
+git clone https://github.com/ARYANPATEL-BIT/RLV-2.git && cd RLV-2
 python -m venv venv && source venv/bin/activate  # or .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
@@ -279,7 +295,54 @@ All scores are deterministic: same actions → same score, always.
 | `/reset` | POST | `{"task_id": "easy\|medium\|hard\|random", "seed": <int>}` | `{session_id, ...Observation}` |
 | `/step` | POST | `Action JSON` + `?session_id=ID` | `{observation, reward, done, info}` |
 | `/state` | GET | `?session_id=ID` | Full state with action history |
+| `/info` | GET | — | Task catalog, instance types, reward formula |
 | `/dashboard` | GET | `?session_id=ID` | Live HTML dashboard |
+
+---
+
+## Example Episode (Easy Task)
+
+A complete episode walkthrough showing reset, one action, and the final state:
+
+```bash
+# 1. Reset to easy task
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "easy"}'
+```
+
+**Response:** An xlarge server ($1.60/hr) running two workloads. Budget is $0.25/hr.
+
+```json
+{
+  "session_id": "a1b2c3d4",
+  "servers": [{"server_id": "srv-001", "instance_type": "xlarge", "cpu_cores": 16, "ram_gb": 32, "cost_per_hour": 1.6, "assigned_workloads": ["wl-web", "wl-api"]}],
+  "workloads": [
+    {"workload_id": "wl-web", "name": "Company Website", "required_cpu": 0.5, "required_ram": 1.0, "current_latency_ms": 40.0, "sla_latency_ms": 200.0, "is_critical": false},
+    {"workload_id": "wl-api", "name": "API Gateway", "required_cpu": 1.0, "required_ram": 1.5, "current_latency_ms": 30.0, "sla_latency_ms": 150.0, "is_critical": true}
+  ],
+  "total_cost_per_hour": 1.6, "budget_per_hour": 0.25, "sla_violations": 0,
+  "step_number": 0, "max_steps": 5, "done": false
+}
+```
+
+```bash
+# 2. Resize the server down to small (2 CPU, 4 GB — fits both workloads)
+curl -X POST "http://localhost:7860/step?session_id=a1b2c3d4" \
+  -H "Content-Type: application/json" \
+  -d '{"action_type": "resize", "server_id": "srv-001", "instance_type": "small"}'
+```
+
+**Response:** Cost drops from $1.60 to $0.20. SLAs still met. Score 0.718.
+
+```json
+{
+  "observation": {"total_cost_per_hour": 0.2, "sla_violations": 0, "step_number": 1},
+  "reward": {"score": 0.718, "cost_efficiency": 0.92, "performance_score": 1.0, "penalty": 0.0,
+             "breakdown": "cost_eff=0.920×0.4 + perf=1.000×0.35 - penalty=0.000×0.25 = 0.7180"},
+  "done": false
+}
+```
 
 ---
 

@@ -1,0 +1,37 @@
+# Copyright (c) 2026. All rights reserved.
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-devops-finops"
+version = "2.0.0"
+description = "AI agent environment for cloud infrastructure cost vs performance optimization."
+authors = [
+    { name = "aryanpatel" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.0.0",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "openenv-core[core]>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+# Server entry point - enables running via: uv run --project . server
+server = "devops_finops.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["devops_finops", "devops_finops.server"]
+package-dir = { "devops_finops" = ".", "devops_finops.server" = "server" }
