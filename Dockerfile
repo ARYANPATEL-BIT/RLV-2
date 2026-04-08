@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Force unbuffered Python stdout/stderr — critical for validator to see structured output
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
 # No apt packages needed — python:3.11-slim has everything we need
 
 WORKDIR /app
