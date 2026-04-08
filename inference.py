@@ -15,8 +15,17 @@ import sys
 import time
 import traceback
 
-import requests
-from openai import OpenAI
+try:
+    import requests
+except ImportError:
+    print("[FATAL] 'requests' package not installed. pip install requests", file=sys.stderr)
+    sys.exit(0)
+
+try:
+    from openai import OpenAI
+except ImportError:
+    print("[FATAL] 'openai' package not installed. pip install openai", file=sys.stderr)
+    sys.exit(0)
 
 # ═══════════════════════════════════════════════════════════════════════
 # CONFIGURATION
