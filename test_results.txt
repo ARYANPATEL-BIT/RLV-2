@@ -1,0 +1,113 @@
+﻿============================================================
+DevOps/FinOps OpenEnv ΓÇö Test Suite
+============================================================
+
+ΓòÉΓòÉΓòÉ Instance Catalog ΓòÉΓòÉΓòÉ
+  Γ£à Has 11 instance types
+  Γ£à nano has all fields
+  Γ£à micro has all fields
+  Γ£à small has all fields
+  Γ£à medium has all fields
+  Γ£à large has all fields
+  Γ£à xlarge has all fields
+  Γ£à compute-opt has all fields
+  Γ£à memory-opt has all fields
+  Γ£à storage-opt has all fields
+  Γ£à spot-medium has all fields
+  Γ£à spot-large has all fields
+  Γ£à Has spot instances
+  Γ£à spot-medium cheaper than medium
+  Γ£à spot-large cheaper than large
+
+ΓòÉΓòÉΓòÉ Cost Efficiency ΓòÉΓòÉΓòÉ
+  Γ£à At zero cost ΓåÆ 1.0
+  Γ£à At budget ΓåÆ 0.90
+  Γ£à Under budget > at budget
+  Γ£à Over budget < at budget
+  Γ¥î At 2x budget ΓåÆ 0.0 ΓÇö 
+  Γ£à Monotonically decreasing
+
+ΓòÉΓòÉΓòÉ Performance Score ΓòÉΓòÉΓòÉ
+  Γ£à All healthy ΓåÆ 1.0
+  Γ£à All breach ΓåÆ 0.0
+  Γ£à All down ΓåÆ 0.0
+  Γ£à Critical breach weighted 2x
+
+ΓòÉΓòÉΓòÉ Penalty System ΓòÉΓòÉΓòÉ
+  Γ£à No actions ΓåÆ 0 penalty
+  Γ£à Single action ΓåÆ 0 penalty
+  Γ£à Repeated action ΓåÆ penalty > 0
+  Γ£à Destructive termination ΓåÆ 0.50 penalty
+  Γ£à 2 destructive ΓåÆ 1.0 (clamped)
+  Γ£à 3 trailing noops after useful action ΓåÆ NO penalty
+  Γ£à All-noop idleness (3 noops, no useful actions) ΓåÆ penalty
+  Γ£à More idle noops ΓåÆ more penalty
+  Γ£à 2 provisions no migrate ΓåÆ penalty
+
+ΓòÉΓòÉΓòÉ Easy Task ΓÇö Single Server Rightsizing ΓòÉΓòÉΓòÉ
+  Γ£à Easy starts with 2 workloads
+  Γ£à Easy starts with 1 server
+  Γ£à Easy budget = $0.25
+  Γ£à Easy no-action score=0.3125 in (0, 1)
+  Γ£à Easy resizeΓåÆsmall score=0.7180 > noop score=0.3125
+  Γ£à Easy resizeΓåÆmicro score=0.0000 != resizeΓåÆsmall
+  Γ£à Easy destructive terminate score=0.0000 < noop
+
+ΓòÉΓòÉΓòÉ Medium Task ΓÇö Multi-Service Consolidation ΓòÉΓòÉΓòÉ
+  Γ£à Medium has 4 workloads
+  Γ£à Medium has 4 servers
+  Γ£à Medium has dependency
+  Γ£à Medium no-action score=0.2500
+  Γ£à Medium consolidate score=0.6020 > noop
+
+ΓòÉΓòÉΓòÉ Hard Task ΓÇö Fleet Chaos Triage ΓòÉΓòÉΓòÉ
+  Γ£à Hard has 6 workloads
+  Γ£à Hard has 5 servers
+  Γ£à Hard starts with SLA violations
+  Γ£à Hard starts with unassigned workloads
+  Γ£à Hard budget = $1.20
+  Γ£à Hard has cascading dependencies
+  Γ£à Hard no-action score=0.2392
+  Γ£à Hard partial-fix score=0.6350 > noop=0.2392
+
+ΓòÉΓòÉΓòÉ Determinism ΓòÉΓòÉΓòÉ
+  Γ£à Same actions ΓåÆ same score
+  Γ£à Same actions ΓåÆ same cost
+
+ΓòÉΓòÉΓòÉ Session Management ΓòÉΓòÉΓòÉ
+  Γ£à Creates unique session IDs
+  Γ£à Can retrieve session 1
+  Γ£à Can retrieve session 2
+  Γ£à Unknown session returns None
+  Γ£à Latest is most recent
+  Γ£à Sessions are independent
+
+ΓòÉΓòÉΓòÉ Procedural Generation ΓòÉΓòÉΓòÉ
+  Γ£à Random task creates servers
+  Γ£à Random task creates workloads
+  Γ£à Random task has budget
+  Γ£à Same seed ΓåÆ same # servers
+  Γ£à Same seed ΓåÆ same # workloads
+  Γ£à Same seed ΓåÆ same budget
+  Γ£à Different seed ΓåÆ different state
+
+ΓòÉΓòÉΓòÉ Spot Eviction ΓòÉΓòÉΓòÉ
+  Γ£à Can provision spot instance
+  Γ£à Spot instance is marked
+
+ΓòÉΓòÉΓòÉ Cascading Failures ΓòÉΓòÉΓòÉ
+  Γ£à wl-api has dependency on wl-auth
+  Γ£à Migrating wl-auth relieves it
+
+ΓòÉΓòÉΓòÉ Traffic Multiplier ΓòÉΓòÉΓòÉ
+  Γ£à Traffic multiplier in range
+  Γ£à Different steps ΓåÆ different multiplier
+  Γ£à Same inputs ΓåÆ same multiplier (deterministic)
+  Γ£à No seed ΓåÆ 1.0
+
+ΓòÉΓòÉΓòÉ Grader Differentiation ΓòÉΓòÉΓòÉ
+  Γ£à 5 different action sets ΓåÆ 4 unique scores (need ΓëÑ4)
+
+============================================================
+RESULTS: 77 passed, 1 failed
+============================================================

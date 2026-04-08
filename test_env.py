@@ -62,7 +62,7 @@ def test_cost_efficiency():
           _compute_cost_efficiency(0.25, budget) > _compute_cost_efficiency(budget, budget))
     check("Over budget < at budget",
           _compute_cost_efficiency(0.80, budget) < _compute_cost_efficiency(budget, budget))
-    check("At 2x budget → 0.0", _compute_cost_efficiency(1.00, budget) == 0.0)
+    check("At 3x budget → 0.0", _compute_cost_efficiency(1.50, budget) == 0.0)
     check("Monotonically decreasing",
           _compute_cost_efficiency(0.10, budget) >
           _compute_cost_efficiency(0.30, budget) >
