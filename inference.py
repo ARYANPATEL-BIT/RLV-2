@@ -211,6 +211,7 @@ def run_task(client: OpenAI, task_id: str) -> float:
     max_steps = obs.get("max_steps", 5)
     final_score = 0.0
     reward = {}
+    action_log = []
 
     print(f"  Session: {session_id}")
     print(f"  Budget: ${obs.get('budget_per_hour', 0):.2f}/hr | "
@@ -224,6 +225,10 @@ def run_task(client: OpenAI, task_id: str) -> float:
             break
 
         user_prompt = build_user_prompt(obs)
+        if action_log:
+            user_prompt += f"\n\n## Action History\nYou have taken {len(action_log)} actions so far:\n"
+            for past_step, (past_a, past_m) in enumerate(action_log):
+                user_prompt += f"  Step {past_step+1}: {past_a.get('action_type', '?')} -> {past_m[:70]}\n"
         messages.append({"role": "user", "content": user_prompt})
 
         # Keep conversation manageable (last 6 exchanges + system)
@@ -249,6 +254,7 @@ def run_task(client: OpenAI, task_id: str) -> float:
         done = step_result.get("done", False)
         final_score = reward.get("score", 0.0)
         info_msg = step_result.get("info", {}).get("action_result", "")
+        action_log.append((action, info_msg))
 
         print(f" -> score={final_score:.4f} | {info_msg[:70]}")
 
