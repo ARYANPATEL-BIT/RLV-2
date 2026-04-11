@@ -2,7 +2,15 @@
 FastAPI application entry point for the DevOps/FinOps OpenEnv Environment.
 
 This module creates an HTTP server exposing the cloud optimization
-environment over HTTP endpoints.
+environment over HTTP endpoints, including the interactive playground UI.
+
+Endpoints:
+    - GET  /         Interactive playground UI
+    - POST /reset    Reset the environment
+    - POST /step     Execute an action
+    - GET  /state    Get current environment state
+    - GET  /health   Health check
+    - GET  /dashboard Live fleet visualization
 
 Usage:
     # Development:
@@ -12,7 +20,7 @@ Usage:
     uvicorn server.app:app --host 0.0.0.0 --port 7860
 
     # Or run directly:
-    uv run --project . server
+    python -m server.app
 """
 
 import sys
@@ -30,7 +38,7 @@ def main():
 
     This function enables running the server without Docker:
         uv run --project . server
-        python -m devops_finops.server.app
+        python -m server.app
     """
     import uvicorn
 
