@@ -43,7 +43,22 @@ except ImportError:
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 MODEL_NAME = os.environ.get("MODEL_NAME", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-ENV_URL = os.environ.get("ENV_URL", "http://localhost:7860")
+
+# ENV_URL resolution order:
+# 1. Explicit ENV_URL env var
+# 2. Constructed from SPACE_ID (HuggingFace Spaces pattern)
+# 3. Default to localhost:7860
+def _resolve_env_url() -> str:
+    explicit = os.environ.get("ENV_URL", "")
+    if explicit:
+        return explicit.rstrip("/")
+    space_id = os.environ.get("SPACE_ID", "")
+    if space_id and "/" in space_id:
+        user, repo = space_id.split("/", 1)
+        return f"https://{user}-{repo}.hf.space"
+    return "http://localhost:7860"
+
+ENV_URL = _resolve_env_url()
 
 TASKS = ["easy", "medium", "hard"]
 REQUEST_TIMEOUT = 30
@@ -257,7 +272,7 @@ def wait_for_env():
         return False
     for attempt in range(ENV_BOOT_RETRIES):
         try:
-            resp = requests.get(f"{ENV_URL}/", timeout=10)
+            resp = requests.get(f"{ENV_URL}/health", timeout=10)
             if resp.status_code == 200:
                 print(f"    ENV reachable on attempt {attempt + 1}", flush=True)
                 return True
@@ -396,7 +411,13 @@ def main():
     sys.stdout.write("")
     sys.stdout.flush()
 
-    print(f"[CONFIG] ENV_URL={ENV_URL} MODEL={MODEL_NAME} API_BASE={API_BASE_URL[:50] if API_BASE_URL else 'unset'}", flush=True)
+    print("="*60, flush=True)
+    print("DevOps/FinOps OpenEnv — Baseline Inference Agent v2.0", flush=True)
+    print("="*60, flush=True)
+    print(f"[CONFIG] ENV_URL={ENV_URL}", flush=True)
+    print(f"[CONFIG] MODEL={MODEL_NAME or 'unset'}", flush=True)
+    print(f"[CONFIG] API_BASE={API_BASE_URL[:50] if API_BASE_URL else 'unset'}", flush=True)
+    print(f"[CONFIG] TASKS={TASKS}", flush=True)
 
     # Create LLM client (or None if not available)
     client = None
