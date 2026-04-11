@@ -912,9 +912,294 @@ app.add_middleware(
 sessions = SessionManager()
 
 
-@app.get("/")
+_PLAYGROUND_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenEnv DevOps/FinOps — Interactive Playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-primary:#0d1117;--bg-secondary:#161b22;--bg-tertiary:#1c2128;
+  --bg-card:#21262d;--bg-hover:#30363d;
+  --border:#30363d;--border-accent:#388bfd40;
+  --text-primary:#e6edf3;--text-secondary:#8b949e;--text-muted:#484f58;
+  --accent:#58a6ff;--accent-dim:#1f6feb;--accent-glow:#58a6ff30;
+  --green:#3fb950;--green-dim:#238636;
+  --orange:#d29922;--red:#f85149;--purple:#bc8cff;
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono','Fira Code',monospace;
+  --radius:10px;--radius-sm:6px;
+}
+html,body{height:100%;font-family:var(--font-sans);background:var(--bg-primary);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.app{display:flex;flex-direction:column;height:100vh}
+.header{display:flex;align-items:center;gap:16px;padding:14px 24px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.header-icon{font-size:1.6rem}
+.header h1{font-size:1.1rem;font-weight:600;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header .tag{font-size:0.65rem;font-weight:600;padding:3px 8px;border-radius:20px;background:var(--green-dim);color:var(--green);letter-spacing:0.5px;text-transform:uppercase}
+.header .version{font-size:0.75rem;color:var(--text-secondary);margin-left:auto}
+.header .hf-link{font-size:0.8rem;color:var(--text-secondary)}.header .hf-link:hover{color:var(--accent)}
+.main{display:flex;flex:1;overflow:hidden}
+.panel-left{width:380px;min-width:320px;flex-shrink:0;background:var(--bg-secondary);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.panel-section{padding:20px;border-bottom:1px solid var(--border)}.panel-section:last-child{border-bottom:none}
+.panel-section h2{font-size:0.8rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.panel-section h2 .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.code-block{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;font-family:var(--font-mono);font-size:0.78rem;line-height:1.7;color:var(--text-secondary);overflow-x:auto;white-space:pre;position:relative}
+.code-block .kw{color:var(--purple)}.code-block .str{color:var(--green)}.code-block .fn{color:var(--accent)}.code-block .cm{color:var(--text-muted)}
+.copy-btn{position:absolute;top:8px;right:8px;background:var(--bg-hover);border:1px solid var(--border);color:var(--text-secondary);padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.65rem;font-family:var(--font-sans);transition:all 0.15s}
+.copy-btn:hover{background:var(--accent-dim);color:#fff;border-color:var(--accent)}
+.endpoint-list{display:flex;flex-direction:column;gap:6px}
+.endpoint{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-tertiary);border-radius:var(--radius-sm);font-size:0.78rem}
+.endpoint .method{font-family:var(--font-mono);font-weight:600;font-size:0.65rem;padding:2px 6px;border-radius:3px;min-width:42px;text-align:center}
+.method-post{background:#238636;color:#fff}.method-get{background:var(--accent-dim);color:#fff}
+.endpoint .path{font-family:var(--font-mono);color:var(--text-primary)}.endpoint .desc{color:var(--text-muted);font-size:0.7rem;margin-left:auto}
+.panel-right{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.controls{padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0}
+.controls-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.controls-header h2{font-size:0.9rem;font-weight:600}
+.session-badge{font-family:var(--font-mono);font-size:0.7rem;padding:4px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:20px;color:var(--text-secondary)}
+.session-badge.active{border-color:var(--green);color:var(--green)}
+.action-btns{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.action-btns button{padding:8px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-family:var(--font-sans);font-size:0.78rem;font-weight:500;cursor:pointer;transition:all 0.2s}
+.action-btns button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow)}
+.action-btns button.active{border-color:var(--accent);color:var(--accent);background:var(--accent-glow);box-shadow:0 0 12px var(--accent-glow)}
+.action-params{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px;min-height:44px}
+.param-group{display:flex;flex-direction:column;gap:4px}
+.param-group label{font-size:0.7rem;color:var(--text-secondary);font-weight:500;text-transform:uppercase;letter-spacing:0.5px}
+.param-group input,.param-group select{padding:8px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;outline:none;transition:border-color 0.2s}
+.param-group input:focus,.param-group select:focus{border-color:var(--accent)}
+.param-group select{cursor:pointer}.param-group select option{background:var(--bg-primary);color:var(--text-primary)}
+.main-actions{display:flex;gap:10px;flex-wrap:wrap}
+.btn{padding:10px 22px;border-radius:var(--radius-sm);border:none;font-family:var(--font-sans);font-size:0.82rem;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:6px}
+.btn:active{transform:scale(0.97)}
+.btn-step{background:var(--accent-dim);color:#fff}.btn-step:hover{background:var(--accent);box-shadow:0 4px 16px var(--accent-glow)}
+.btn-reset{background:var(--green-dim);color:var(--green)}.btn-reset:hover{background:#2ea043}
+.btn-state{background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--border)}.btn-state:hover{border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+.task-select{margin-left:auto;display:flex;align-items:center;gap:8px}
+.task-select label{font-size:0.75rem;color:var(--text-secondary);font-weight:500}
+.task-select select{padding:8px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;outline:none;cursor:pointer}
+.response-panel{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.response-header{display:flex;align-items:center;gap:12px;padding:12px 24px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.response-header h3{font-size:0.8rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
+.status-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green)}
+.status-dot.error{background:var(--red);box-shadow:0 0 8px var(--red)}
+.status-dot.loading{background:var(--orange);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.response-meta{font-family:var(--font-mono);font-size:0.7rem;color:var(--text-muted);margin-left:auto}
+.response-body{flex:1;overflow-y:auto;padding:16px 24px;font-family:var(--font-mono);font-size:0.78rem;line-height:1.7;background:var(--bg-primary)}
+.json-viewer{white-space:pre-wrap;word-break:break-word}
+.json-key{color:var(--accent)}.json-str{color:var(--green)}.json-num{color:var(--orange)}.json-bool{color:var(--purple)}.json-null{color:var(--red)}.json-bracket{color:var(--text-muted)}
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;color:var(--text-muted);text-align:center;padding:40px}
+.welcome .icon{font-size:3rem;opacity:0.5}.welcome h3{font-size:1rem;color:var(--text-secondary)}.welcome p{font-size:0.82rem;max-width:400px;line-height:1.6}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+@media(max-width:900px){.main{flex-direction:column}.panel-left{width:100%;max-height:40vh;border-right:none;border-bottom:1px solid var(--border)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <span class="header-icon">&#9729;&#65039;</span>
+    <h1>DevOps/FinOps Cloud Optimizer</h1>
+    <span class="tag">OpenEnv</span>
+    <span class="version">v2.0.0</span>
+    <a class="hf-link" href="https://huggingface.co/spaces/Aryan-void/openenv-devops-2" target="_blank">&#129303; Space</a>
+  </header>
+  <div class="main">
+    <aside class="panel-left">
+      <div class="panel-section">
+        <h2><span class="dot"></span>Quick Start</h2>
+        <div class="code-block" id="quickstart-code"><button class="copy-btn" onclick="copyCode('quickstart-code')">Copy</button><span class="kw">from</span> client <span class="kw">import</span> <span class="fn">DevOpsEnv</span>
+
+env = <span class="fn">DevOpsEnv</span>(<span class="str">"https://aryan-void-openenv-devops-2.hf.space"</span>)
+obs = env.<span class="fn">reset</span>(task_id=<span class="str">"easy"</span>)
+
+<span class="cm"># Take an action</span>
+result = env.<span class="fn">step</span>({
+    <span class="str">"action_type"</span>: <span class="str">"resize"</span>,
+    <span class="str">"server_id"</span>: <span class="str">"srv-001"</span>,
+    <span class="str">"instance_type"</span>: <span class="str">"small"</span>
+})
+<span class="fn">print</span>(result[<span class="str">"reward"</span>][<span class="str">"score"</span>])</div>
+      </div>
+      <div class="panel-section">
+        <h2><span class="dot"></span>API Endpoints</h2>
+        <div class="endpoint-list">
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/reset</span><span class="desc">New episode</span></div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/step</span><span class="desc">Execute action</span></div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/state</span><span class="desc">Current state</span></div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/health</span><span class="desc">Health check</span></div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/dashboard</span><span class="desc">Live fleet view</span></div>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h2><span class="dot"></span>cURL Example</h2>
+        <div class="code-block" id="curl-code"><button class="copy-btn" onclick="copyCode('curl-code')">Copy</button><span class="cm"># Reset environment</span>
+curl -X POST <span class="str">BASE_URL/reset</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"task_id": "easy"}'</span>
+
+<span class="cm"># Step with action</span>
+curl -X POST <span class="str">"BASE_URL/step?session_id=ID"</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"action_type": "noop"}'</span></div>
+      </div>
+      <div class="panel-section">
+        <h2><span class="dot"></span>About</h2>
+        <p style="font-size:0.78rem;color:var(--text-secondary);line-height:1.7">
+          AI agent environment for cloud infrastructure cost vs. performance optimization.
+          Features <strong>11 instance types</strong>, <strong>4 resource dimensions</strong>,
+          spot eviction, cascading failures, and 3 difficulty tiers.
+          <br><br>
+          Score = <code style="color:var(--accent)">cost&#215;0.40 + perf&#215;0.35 &#8722; penalty&#215;0.25</code>
+        </p>
+      </div>
+    </aside>
+    <div class="panel-right">
+      <div class="controls">
+        <div class="controls-header">
+          <h2>&#127918; Playground</h2>
+          <span class="session-badge" id="session-badge">No Session</span>
+        </div>
+        <div class="action-btns" id="action-btns">
+          <button class="active" data-action="noop">noop</button>
+          <button data-action="provision">provision</button>
+          <button data-action="terminate">terminate</button>
+          <button data-action="resize">resize</button>
+          <button data-action="migrate">migrate</button>
+        </div>
+        <div class="action-params" id="action-params"></div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-step" id="btn-step" onclick="doStep()">&#9654; Step</button>
+          <button class="btn btn-reset" id="btn-reset" onclick="doReset()">&#8634; Reset</button>
+          <button class="btn btn-state" id="btn-state" onclick="doGetState()">&#128203; Get State</button>
+          <div class="task-select">
+            <label for="task-id">Task:</label>
+            <select id="task-id">
+              <option value="easy">&#128994; easy &#8212; Rightsizing</option>
+              <option value="medium">&#128992; medium &#8212; Consolidation</option>
+              <option value="hard">&#128308; hard &#8212; Chaos Triage</option>
+              <option value="random">&#127922; random &#8212; Procedural</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="response-panel">
+        <div class="response-header">
+          <span class="status-dot" id="status-dot"></span>
+          <h3>Response</h3>
+          <span class="response-meta" id="response-meta"></span>
+        </div>
+        <div class="response-body" id="response-body">
+          <div class="welcome">
+            <div class="icon">&#9729;&#65039;</div>
+            <h3>Ready to explore</h3>
+            <p>Click <strong>Reset</strong> to start a new episode, then use <strong>Step</strong> to execute actions against the cloud fleet simulator.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const BASE=window.location.origin;
+let sessionId=null;let currentAction='noop';
+const ACTION_PARAMS={
+  noop:[],
+  provision:[{id:'instance_type',label:'Instance Type',type:'select',options:['nano','micro','small','medium','large','xlarge','compute-opt','memory-opt','storage-opt','spot-medium','spot-large']}],
+  terminate:[{id:'server_id',label:'Server ID',type:'text',placeholder:'srv-001'}],
+  resize:[{id:'server_id',label:'Server ID',type:'text',placeholder:'srv-001'},{id:'instance_type',label:'New Instance Type',type:'select',options:['nano','micro','small','medium','large','xlarge','compute-opt','memory-opt','storage-opt','spot-medium','spot-large']}],
+  migrate:[{id:'workload_id',label:'Workload ID',type:'text',placeholder:'wl-web'},{id:'target_server_id',label:'Target Server',type:'text',placeholder:'srv-002'}]
+};
+document.querySelectorAll('#action-btns button').forEach(function(btn){
+  btn.addEventListener('click',function(){
+    document.querySelectorAll('#action-btns button').forEach(function(b){b.classList.remove('active')});
+    btn.classList.add('active');currentAction=btn.dataset.action;renderParams();
+  });
+});
+function renderParams(){
+  var c=document.getElementById('action-params');var params=ACTION_PARAMS[currentAction];
+  if(!params.length){c.innerHTML='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:0.8rem;padding:8px 0">No parameters needed &#8212; just click Step</div>';return}
+  c.innerHTML=params.map(function(p){
+    if(p.type==='select'){return '<div class="param-group"><label for="p-'+p.id+'">'+p.label+'</label><select id="p-'+p.id+'">'+p.options.map(function(o){return '<option value="'+o+'">'+o+'</option>'}).join('')+'</select></div>'}
+    return '<div class="param-group"><label for="p-'+p.id+'">'+p.label+'</label><input type="text" id="p-'+p.id+'" placeholder="'+(p.placeholder||'')+'"></div>'
+  }).join('');
+}
+function buildAction(){
+  var action={action_type:currentAction};
+  ACTION_PARAMS[currentAction].forEach(function(p){var el=document.getElementById('p-'+p.id);if(el&&el.value)action[p.id]=el.value});
+  return action;
+}
+function setStatus(state){document.getElementById('status-dot').className='status-dot '+state}
+function setMeta(text){document.getElementById('response-meta').textContent=text}
+function updateSessionBadge(){
+  var badge=document.getElementById('session-badge');
+  if(sessionId){badge.textContent='Session: '+sessionId;badge.className='session-badge active'}
+  else{badge.textContent='No Session';badge.className='session-badge'}
+}
+function renderJSON(obj){
+  var body=document.getElementById('response-body');var json=JSON.stringify(obj,null,2);
+  var h=json.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"([^"]+)":/g,'<span class="json-key">"$1"</span>:')
+    .replace(/: "([^"]*)"/g,': <span class="json-str">"$1"</span>')
+    .replace(/: (-?\d+\.?\d*)/g,': <span class="json-num">$1</span>')
+    .replace(/: (true|false)/g,': <span class="json-bool">$1</span>')
+    .replace(/: (null)/g,': <span class="json-null">$1</span>')
+    .replace(/([[\]{}])/g,'<span class="json-bracket">$1</span>');
+  body.innerHTML='<div class="json-viewer">'+h+'</div>';
+}
+function renderError(msg){
+  document.getElementById('response-body').innerHTML='<div class="welcome"><div class="icon">&#9888;&#65039;</div><h3>Error</h3><p style="color:var(--red)">'+msg+'</p></div>';
+}
+async function apiCall(method,path,body){
+  setStatus('loading');var t0=performance.now();
+  try{
+    var opts={method:method,headers:{'Content-Type':'application/json'}};
+    if(body)opts.body=JSON.stringify(body);
+    var resp=await fetch(BASE+path,opts);var data=await resp.json();
+    var ms=Math.round(performance.now()-t0);
+    setStatus(resp.ok?'ok':'error');setMeta(resp.status+' '+resp.statusText+' \u00b7 '+ms+'ms');
+    renderJSON(data);return{ok:resp.ok,data:data};
+  }catch(err){setStatus('error');setMeta('Network error');renderError(err.message);return{ok:false,data:null}}
+}
+async function doReset(){
+  var taskId=document.getElementById('task-id').value;
+  var r=await apiCall('POST','/reset',{task_id:taskId});
+  if(r.ok&&r.data&&r.data.session_id){sessionId=r.data.session_id;updateSessionBadge()}
+}
+async function doStep(){
+  if(!sessionId){renderError('No active session. Click Reset first to start an episode.');setStatus('error');setMeta('');return}
+  await apiCall('POST','/step?session_id='+sessionId,buildAction());
+}
+async function doGetState(){
+  if(!sessionId){renderError('No active session. Click Reset first to start an episode.');setStatus('error');setMeta('');return}
+  await apiCall('GET','/state?session_id='+sessionId);
+}
+function copyCode(id){
+  var el=document.getElementById(id);var text=el.textContent.replace('Copy','').trim();
+  navigator.clipboard.writeText(text).then(function(){var btn=el.querySelector('.copy-btn');btn.textContent='Copied!';setTimeout(function(){btn.textContent='Copy'},1500)});
+}
+renderParams();updateSessionBadge();
+</script>
+</body>
+</html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def playground():
+    """Interactive playground UI for the DevOps/FinOps Cloud Optimizer environment."""
+    return HTMLResponse(_PLAYGROUND_HTML)
+
+
+@app.get("/health")
 def health_check():
     return {"status": "ok", "environment": "devops-finops-cloud-optimizer", "version": "2.0.0"}
+
 
 @app.get("/info")
 def info_endpoint():
