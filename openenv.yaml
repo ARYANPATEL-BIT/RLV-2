@@ -1,6 +1,14 @@
 # openenv.yaml — Environment manifest for DevOps/FinOps OpenEnv v2.0
 # Validated with: openenv validate
 
+title: "OpenEnv DevOps FinOps Cloud Optimizer"
+emoji: "☁️"
+colorFrom: blue
+colorTo: purple
+app_port: 7860
+tags:
+  - openenv
+
 spec_version: 1
 
 name: devops-finops-cloud-optimizer
@@ -12,12 +20,6 @@ description: >
   failures, and deterministic traffic spikes. Supports 3 fixed difficulty tiers
   plus procedural generation for unlimited evaluation scenarios.
 author: "aryanpatel"
-tags:
-  - openenv
-  - devops
-  - finops
-  - cloud-optimization
-  - reinforcement-learning
 
 docker_port: 7860
 
